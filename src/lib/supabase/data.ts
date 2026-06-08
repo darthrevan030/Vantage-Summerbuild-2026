@@ -132,6 +132,26 @@ export async function insertHolding(
   return toHoldingRow(data as DbHolding);
 }
 
+export async function updateHolding(
+  id: string,
+  userId: string,
+  patch: Partial<Pick<DbHolding,
+    "ticker" | "name" | "asset_type" | "broker" | "strategy" | "units" |
+    "currency" | "buy_price" | "buy_date" | "buy_fx_rate" | "current_price" | "current_fx_rate"
+  >>
+): Promise<HoldingRow | null> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("holdings")
+    .update(patch)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) { console.error("[updateHolding]", error.message); return null; }
+  return toHoldingRow(data as DbHolding);
+}
+
 export async function updateHoldingPrice(
   id: string,
   currentPrice: number,

@@ -4,11 +4,17 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
+import { Select } from "@/components/Select";
 import { Spark } from "@/components/charts/Spark";
 import { Dumbbell } from "@/components/charts/Dumbbell";
 import { pct, rate, NF } from "@/lib/formatters";
 import { refreshHoldingPrices } from "@/lib/api-client";
 import type { HoldingRow } from "@/types/holding";
+
+const ASSET_TYPES_EDIT = ["Equity", "ETF", "REIT", "Gold", "RE"];
+const STRAT_LABEL_EDIT: Record<string, string> = {
+  long_term: "Long Term", active: "Active", speculative: "Speculative", physical: "Physical",
+};
 
 const STRAT: Record<string, { label: string; cls: string }> = {
   long_term:   { label: "long-term",    cls: "st-teal"   },
@@ -24,9 +30,119 @@ type SortKey = typeof SORT_KEYS[number];
 
 function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   const { fmtVal, fmtSigned } = usePortfolio();
+  const router = useRouter();
   const d = h.detail;
   const total = h.assetGain + h.fxGain;
   const assetGainNative = (d.curPx - d.buyPx) * d.buyUnits;
+
+  type Mode = "view" | "edit" | "confirm-delete";
+  const [mode, setMode] = useState<Mode>("view");
+  const [saving, setSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: h.name, ticker: h.ticker,
+    asset_type: h.assetType, strategy: h.strategy,
+    units: String(h.units),
+    current_price: String(h.currentPrice), current_fx_rate: String(h.currentFxRate),
+    buy_price: String(h.buyPrice), buy_date: h.buyDate, buy_fx_rate: String(h.buyFxRate),
+  });
+  const ef = editForm;
+  const setEf = (k: string, v: string) => setEditForm(f => ({ ...f, [k]: v }));
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await fetch(`/api/holdings?id=${h.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: ef.name, ticker: ef.ticker,
+          asset_type: ef.asset_type, strategy: ef.strategy,
+          units: Number(ef.units),
+          current_price: Number(ef.current_price),
+          current_fx_rate: Number(ef.current_fx_rate),
+          buy_price: Number(ef.buy_price),
+          buy_date: ef.buy_date,
+          buy_fx_rate: Number(ef.buy_fx_rate),
+        }),
+      });
+      router.refresh();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setSaving(true);
+    try {
+      await fetch(`/api/holdings?id=${h.id}`, { method: "DELETE" });
+      router.refresh();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (mode === "edit") return (
+    <div className="detail-card reveal">
+      <div className="dc-head">
+        <div className="dc-id">
+          <Icon name={h.icon as never} size={18} style={{ color: "var(--gold)" }} />
+          <div className="ui dc-name">{h.name}</div>
+        </div>
+        <button className="dc-close" onClick={() => setMode("view")}><Icon name="x" size={15} /></button>
+      </div>
+      <div className="dc-form">
+        <div className="dc-field full">
+          <span className="dc-field-label">Name</span>
+          <input className="dc-inp" value={ef.name} onChange={e => setEf("name", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Ticker</span>
+          <input className="dc-inp" value={ef.ticker} onChange={e => setEf("ticker", e.target.value.toUpperCase())} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Asset Type</span>
+          <Select value={ef.asset_type} options={ASSET_TYPES_EDIT} onChange={v => setEf("asset_type", v)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Strategy</span>
+          <Select
+            value={STRAT_LABEL_EDIT[ef.strategy] ?? ef.strategy}
+            options={Object.values(STRAT_LABEL_EDIT)}
+            onChange={v => setEf("strategy", Object.entries(STRAT_LABEL_EDIT).find(([,l]) => l === v)?.[0] ?? ef.strategy)}
+          />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Units</span>
+          <input className="dc-inp" type="number" value={ef.units} onChange={e => setEf("units", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Buy Price</span>
+          <input className="dc-inp" type="number" value={ef.buy_price} onChange={e => setEf("buy_price", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Buy Date</span>
+          <input className="dc-inp" type="date" value={ef.buy_date} onChange={e => setEf("buy_date", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Buy FX Rate</span>
+          <input className="dc-inp" type="number" value={ef.buy_fx_rate} onChange={e => setEf("buy_fx_rate", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Current Price</span>
+          <input className="dc-inp" type="number" value={ef.current_price} onChange={e => setEf("current_price", e.target.value)} />
+        </div>
+        <div className="dc-field">
+          <span className="dc-field-label">Current FX Rate</span>
+          <input className="dc-inp" type="number" value={ef.current_fx_rate} onChange={e => setEf("current_fx_rate", e.target.value)} />
+        </div>
+      </div>
+      <button className="dc-save" onClick={handleSave} disabled={saving}>
+        {saving ? "Saving…" : "Save Changes"}
+      </button>
+    </div>
+  );
 
   return (
     <div className="detail-card reveal">
@@ -83,9 +199,7 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
             <span />
           </div>
         )}
-
         <div className="dc-div" />
-
         <div className="math-row">
           <span className="ui" style={{ color: "var(--gain)" }}>Asset gain</span>
           <span className="mono" style={{ color: "var(--gain)" }}>
@@ -110,7 +224,6 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
         </div>
       </div>
 
-      {/* dumbbell chart: asset vs fx contribution */}
       <div style={{ marginTop: 12 }}>
         <Dumbbell
           asset={h.assetGain}
@@ -118,6 +231,27 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           scale={Math.max(Math.abs(h.assetGain + h.fxGain), Math.abs(h.assetGain), 1) * 1.2}
         />
       </div>
+
+      {mode === "confirm-delete" ? (
+        <div className="dc-confirm">
+          <span className="ui" style={{ fontSize: 12.5 }}>Delete <strong>{h.name}</strong> permanently?</span>
+          <div className="dc-actions">
+            <button className="dc-btn del" onClick={handleDelete} disabled={saving}>
+              {saving ? "Deleting…" : "Yes, delete"}
+            </button>
+            <button className="dc-btn edit" onClick={() => setMode("view")}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="dc-actions">
+          <button className="dc-btn edit" onClick={() => setMode("edit")}>
+            <Icon name="sliders" size={13} />Edit
+          </button>
+          <button className="dc-btn del" onClick={() => setMode("confirm-delete")}>
+            <Icon name="x" size={13} />Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }

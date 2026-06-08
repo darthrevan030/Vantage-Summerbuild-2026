@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
+import { Select } from "@/components/Select";
 import { fetchFx } from "@/lib/api-client";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE"];
@@ -21,29 +22,13 @@ const TYPE_ICON: Record<string, string> = {
   Equity: "briefcase", ETF: "layers", REIT: "landmark", Gold: "gem", RE: "building",
 };
 
-// ---- reusable field/select primitives ----
+// ---- reusable field primitive ----
 function Field({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
   return (
     <label className={"field" + (full ? " full" : "")}>
       <span className="ui field-label">{label}</span>
       {children}
     </label>
-  );
-}
-
-function NativeSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
-  return (
-    <div className="select" style={{ position: "relative" }}>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
-      >
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <span className="ui">{value}</span>
-      <Icon name="chevron" size={14} />
-    </div>
   );
 }
 
@@ -154,10 +139,10 @@ function ManualForm() {
           <input className="inp" placeholder="MSFT" value={form.ticker} onChange={(e) => set("ticker", e.target.value.toUpperCase())} />
         </Field>
         <Field label="Asset Type">
-          <NativeSelect value={form.asset_type} options={ASSET_TYPES} onChange={(v) => set("asset_type", v)} />
+          <Select value={form.asset_type} options={ASSET_TYPES} onChange={(v) => set("asset_type", v)} />
         </Field>
         <Field label="Strategy">
-          <NativeSelect value={STRAT_LABEL[form.strategy]} options={Object.values(STRAT_LABEL)} onChange={(v) => {
+          <Select value={STRAT_LABEL[form.strategy]} options={Object.values(STRAT_LABEL)} onChange={(v) => {
             const k = Object.entries(STRAT_LABEL).find(([, lbl]) => lbl === v)?.[0] ?? "long_term";
             set("strategy", k);
           }} />
@@ -169,7 +154,7 @@ function ManualForm() {
           <input className="inp" type="number" placeholder="100" value={form.units} onChange={(e) => set("units", e.target.value)} />
         </Field>
         <Field label="Currency">
-          <NativeSelect value={CCY_FLAGS[form.currency] + " " + form.currency} options={CURRENCIES.map((c) => CCY_FLAGS[c] + " " + c)} onChange={(v) => set("currency", v.split(" ")[1])} />
+          <Select value={CCY_FLAGS[form.currency] + " " + form.currency} options={CURRENCIES.map((c) => CCY_FLAGS[c] + " " + c)} onChange={(v) => set("currency", v.split(" ")[1])} />
         </Field>
         <Field label="Purchase Price">
           <input className="inp" type="number" placeholder="412.50" value={form.buy_price} onChange={(e) => set("buy_price", e.target.value)} />

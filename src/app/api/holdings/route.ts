@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchHoldings, insertHolding, deleteHolding } from "@/lib/supabase/data";
+import { fetchHoldings, insertHolding, deleteHolding, updateHolding } from "@/lib/supabase/data";
 import { createClient } from "@/lib/supabase/server";
 
 async function getAuthUser() {
@@ -56,6 +56,26 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(row, { status: 201 });
+}
+
+export async function PATCH(req: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const body = await req.json();
+  const patch: Record<string, unknown> = {};
+  const allowed = ["ticker","name","asset_type","broker","strategy","units","currency","buy_price","buy_date","buy_fx_rate","current_price","current_fx_rate"];
+  for (const k of allowed) {
+    if (body[k] !== undefined) patch[k] = body[k];
+  }
+
+  const row = await updateHolding(id, user.id, patch);
+  if (!row) return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  return NextResponse.json(row);
 }
 
 export async function DELETE(req: NextRequest) {
