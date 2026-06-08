@@ -1,5 +1,5 @@
-import { fetchHoldings, updateHoldingPrice } from "@/lib/supabase/data";
-import { fetchLivePrices, fetchLiveFxRates, fetchCryptoSparks } from "@/lib/prices";
+import { fetchHoldings, updateHoldingPrice, recordSnapshot } from "@/lib/supabase/data";
+import { fetchLivePrices, fetchLiveFxRates, fetchCryptoSparks, fetchEquitySparks } from "@/lib/prices";
 import { createClient } from "@/lib/supabase/server";
 
 async function getAuthUser() {
@@ -29,27 +29,31 @@ export async function POST() {
   // Unique non-placeholder tickers across all stale holdings
   const tickers = [...new Set(stale.map((h) => h.ticker).filter((t) => t !== "—"))];
 
-  const [livePrices, liveFxRates, cryptoSparks] = await Promise.all([
+  const [livePrices, liveFxRates, cryptoSparks, equitySparks] = await Promise.all([
     fetchLivePrices(tickers),
     fetchLiveFxRates(),
     fetchCryptoSparks(tickers),
+    fetchEquitySparks(tickers),
   ]);
 
-  // Always write back (resets price_refreshed_at), using live price where available
-  // and falling back to the stored value so we don't zero-out holdings with missing API keys
   await Promise.all(
     stale.map((h) => {
       const newPrice = livePrices[h.ticker];
       const newFx    = h.currency === "SGD" ? 1 : liveFxRates[h.currency];
+      const sparkData = cryptoSparks[h.ticker] ?? equitySparks[h.ticker];
       return updateHoldingPrice(
         h.id,
         newPrice && newPrice > 0 ? newPrice : h.currentPrice,
         newFx    && newFx    > 0 ? newFx    : h.currentFxRate,
         user.id,
-        cryptoSparks[h.ticker],
+        sparkData,
       );
     })
   );
+
+  // Re-fetch after updates to get fresh derived values, then snapshot
+  const fresh = await fetchHoldings(user.id);
+  await recordSnapshot(user.id, fresh);
 
   return Response.json({ refreshed: stale.length, skipped: holdings.length - stale.length });
 }

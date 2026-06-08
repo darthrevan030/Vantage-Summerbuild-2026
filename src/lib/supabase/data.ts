@@ -189,6 +189,55 @@ export async function fetchUserSettings(userId: string): Promise<UserSettings> {
   };
 }
 
+export interface SnapshotRow {
+  recordedDate: string;
+  valueSgd: number;
+  costSgd: number;
+  fxImpactSgd: number;
+  fxByCurrency: Record<string, number>;
+}
+
+export async function fetchSnapshots(userId: string): Promise<SnapshotRow[]> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("portfolio_snapshots")
+    .select("recorded_date, value_sgd, cost_sgd, fx_impact_sgd, fx_by_currency")
+    .eq("user_id", userId)
+    .order("recorded_date", { ascending: true });
+  return (data ?? []).map((r) => ({
+    recordedDate: r.recorded_date as string,
+    valueSgd: Number(r.value_sgd),
+    costSgd: Number(r.cost_sgd),
+    fxImpactSgd: Number(r.fx_impact_sgd),
+    fxByCurrency: (r.fx_by_currency ?? {}) as Record<string, number>,
+  }));
+}
+
+export async function recordSnapshot(userId: string, holdings: HoldingRow[]): Promise<void> {
+  const valueSgd = holdings.reduce((s, h) => s + h.valueSGD, 0);
+  const costSgd = holdings.reduce((s, h) => s + h.costSGD, 0);
+  const fxImpactSgd = holdings.reduce((s, h) => s + h.fxGain, 0);
+  const fxByCurrency: Record<string, number> = {};
+  for (const h of holdings) {
+    if (h.currency !== "SGD") {
+      const k = h.currency.toLowerCase();
+      fxByCurrency[k] = (fxByCurrency[k] ?? 0) + h.fxGain;
+    }
+  }
+  const supabase = await makeServerClient();
+  await supabase.from("portfolio_snapshots").upsert(
+    {
+      user_id: userId,
+      recorded_date: new Date().toISOString().slice(0, 10),
+      value_sgd: Math.round(valueSgd),
+      cost_sgd: Math.round(costSgd),
+      fx_impact_sgd: Math.round(fxImpactSgd),
+      fx_by_currency: fxByCurrency,
+    },
+    { onConflict: "user_id,recorded_date" }
+  );
+}
+
 export async function upsertUserSettings(
   userId: string,
   settings: Partial<UserSettings>

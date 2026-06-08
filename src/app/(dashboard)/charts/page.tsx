@@ -67,7 +67,14 @@ function PortfolioTrend() {
 
   const first = data[0];
   const last  = data[data.length - 1];
-  if (!first || !last) return null;
+  if (!first || !last) return (
+    <div className="card chart-card reveal" style={{ animationDelay: ".04s" }}>
+      <div className="card-head"><span className="card-title">Portfolio Value Over Time</span></div>
+      <div className="ui muted" style={{ padding: "32px 0", textAlign: "center" }}>
+        Add holdings to see portfolio value over time.
+      </div>
+    </div>
+  );
   const chg    = last.v - first.v;
   const chgPct = first.v > 0 ? (chg / first.v) * 100 : 0;
   const pos    = chg >= 0;

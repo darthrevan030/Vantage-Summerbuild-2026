@@ -1,4 +1,5 @@
 import type { HoldingRow } from "@/types/holding";
+import type { SnapshotRow } from "@/lib/supabase/data";
 import type {
   HeroStats,
   MoverItem,
@@ -41,7 +42,7 @@ export function buildBaseFxRates(cards: CurrencyCard[]): Record<string, number> 
   return rates;
 }
 
-export function computeHeroStats(holdings: HoldingRow[]): HeroStats {
+export function computeHeroStats(holdings: HoldingRow[], snapshots: SnapshotRow[] = []): HeroStats {
   const total = holdings.reduce((s, h) => s + h.valueSGD, 0);
   const cost = holdings.reduce((s, h) => s + h.costSGD, 0);
   const totalGain = total - cost;
@@ -50,10 +51,16 @@ export function computeHeroStats(holdings: HoldingRow[]): HeroStats {
   const fxPct = cost > 0 ? (fxImpact / cost) * 100 : 0;
   const neutral = total - fxImpact;
 
+  // Day change from the most recent two distinct-date snapshots
+  const today = new Date().toISOString().slice(0, 10);
+  const prevSnap = [...snapshots].reverse().find((s) => s.recordedDate < today);
+  const dayChange = prevSnap ? total - prevSnap.valueSgd : 0;
+  const dayPct = prevSnap && prevSnap.valueSgd > 0 ? (dayChange / prevSnap.valueSgd) * 100 : 0;
+
   return {
     total,
-    dayChange: 0,
-    dayPct: 0,
+    dayChange,
+    dayPct,
     totalGain,
     totalGainPct,
     fxImpact,
@@ -157,104 +164,94 @@ export function computeWaterfall(cards: CurrencyCard[]): WaterfallItem[] {
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function generatePortfolioSeries(holdings: HoldingRow[]): PortfolioSeriesPoint[] {
-  if (holdings.length === 0) return [];
-
-  const now = new Date();
-  const nowYr = now.getFullYear();
-  const nowMo = now.getMonth(); // 0-indexed
-
-  const earliest = holdings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), holdings[0].buyDate);
-  const startYr = parseInt(earliest.slice(0, 4));
-  const startMo = parseInt(earliest.slice(5, 7)) - 1;
-  const totalMonths = (nowYr - startYr) * 12 + (nowMo - startMo) + 1;
-  if (totalMonths <= 0) return [];
-
-  const series: PortfolioSeriesPoint[] = [];
-  let yr = startYr, mo = startMo;
-
-  for (let i = 0; i < totalMonths; i++) {
-    const date = `${yr}-${String(mo + 1).padStart(2, "0")}`;
-    const isLast = i === totalMonths - 1;
-    let v = 0;
-
-    for (const h of holdings) {
-      if (h.buyDate.slice(0, 7) > date) continue; // not yet owned
-
-      if (isLast) {
-        v += h.valueSGD;
-      } else {
-        const buyYr = parseInt(h.buyDate.slice(0, 4));
-        const buyMo = parseInt(h.buyDate.slice(5, 7)) - 1;
-        const buyIdx = (buyYr - startYr) * 12 + (buyMo - startMo);
-        const totalAge = totalMonths - 1 - buyIdx;
-        const t = totalAge > 0 ? (i - buyIdx) / totalAge : 1;
-        const trend = h.costSGD + (h.valueSGD - h.costSGD) * t;
-        // Deterministic noise per holding+month so chart is stable across re-renders
-        const seed = h.ticker.charCodeAt(0) * 17 + i;
-        const amp = Math.abs(h.valueSGD) * 0.018;
-        v += trend + Math.sin(seed * 0.7) * amp * 0.7 + Math.sin(seed * 1.9 + 1) * amp * 0.3;
-      }
-    }
-
-    series.push({ label: `${MON[mo]} ${String(yr).slice(2)}`, date, v: Math.max(0, Math.round(v)) });
-    mo++;
-    if (mo > 11) { mo = 0; yr++; }
-  }
-
-  // Pin last point to exact current total
-  const total = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  if (series.length > 0) series[series.length - 1].v = Math.round(total);
-
-  return series;
+function ymLabel(ym: string): string {
+  const yr = parseInt(ym.slice(0, 4));
+  const mo = parseInt(ym.slice(5, 7)) - 1;
+  return `${MON[mo]} ${String(yr).slice(2)}`;
 }
 
-/** Generates simulated FX impact series. Returns series data + YYYY-MM date strings. */
-export function generateFxSeries(currencyCards: CurrencyCard[], holdings: HoldingRow[]): {
-  series: FxSeriesPoint[];
-  fxLabels: string[];
-} {
-  const finals: Record<string, number> = {};
-  for (const c of currencyCards) {
-    finals[c.code.toLowerCase()] = Math.round(c.impact);
+function snapshotsByMonth(snapshots: SnapshotRow[]): Map<string, SnapshotRow> {
+  const byMonth = new Map<string, SnapshotRow>();
+  for (const s of snapshots) byMonth.set(s.recordedDate.slice(0, 7), s);
+  return byMonth;
+}
+
+/** Builds portfolio value series from real snapshots, falling back to a
+ *  2-point seed (cost at earliest buy → current value) when no snapshots exist. */
+export function generatePortfolioSeries(
+  snapshots: SnapshotRow[],
+  holdings: HoldingRow[] = []
+): PortfolioSeriesPoint[] {
+  if (snapshots.length > 0) {
+    return Array.from(snapshotsByMonth(snapshots).entries()).map(([ym, s]) => ({
+      label: ymLabel(ym),
+      date: ym,
+      v: Math.round(s.valueSgd),
+    }));
   }
-  const keys = Object.keys(finals);
-  if (keys.length === 0) return { series: [], fxLabels: [] };
 
-  const now = new Date();
-  const nowYr = now.getFullYear();
-  const nowMo = now.getMonth();
+  // Fallback: 2-point seed from current holdings (cost at buy date → value today)
+  if (holdings.length === 0) return [];
+  const earliest = holdings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), holdings[0].buyDate);
+  const startYm = earliest.slice(0, 7);
+  const todayYm = new Date().toISOString().slice(0, 7);
+  const totalCost = Math.round(holdings.reduce((s, h) => s + h.costSGD, 0));
+  const totalValue = Math.round(holdings.reduce((s, h) => s + h.valueSGD, 0));
 
+  if (startYm === todayYm) {
+    return [{ label: ymLabel(startYm), date: startYm, v: totalValue }];
+  }
+  return [
+    { label: ymLabel(startYm), date: startYm, v: totalCost },
+    { label: ymLabel(todayYm), date: todayYm, v: totalValue },
+  ];
+}
+
+/** Builds per-currency FX impact series from real snapshots, falling back to a
+ *  2-point seed (0 at earliest buy date → current impact today) when no snapshots exist. */
+export function generateFxSeries(
+  snapshots: SnapshotRow[],
+  currencyCards: CurrencyCard[],
+  holdings: HoldingRow[] = []
+): { series: FxSeriesPoint[]; fxLabels: string[] } {
+  if (currencyCards.length === 0) return { series: [], fxLabels: [] };
+  const activeCurrencies = currencyCards.map((c) => c.code.toLowerCase());
+
+  if (snapshots.length > 0) {
+    const byMonth = snapshotsByMonth(snapshots);
+    const fxLabels: string[] = [];
+    const series: FxSeriesPoint[] = [];
+    let i = 0;
+    for (const [ym, s] of byMonth.entries()) {
+      fxLabels.push(ym);
+      const point: FxSeriesPoint = { i };
+      for (const ccy of activeCurrencies) point[ccy] = Math.round(s.fxByCurrency[ccy] ?? 0);
+      series.push(point);
+      i++;
+    }
+    return { series, fxLabels };
+  }
+
+  // Fallback: 2-point seed — FX impact was 0 at earliest buy, is current value today
   const fxHoldings = holdings.filter((h) => h.currency !== "SGD");
-  const earliest = fxHoldings.length > 0
-    ? fxHoldings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), fxHoldings[0].buyDate)
-    : `${nowYr - 1}-01`;
-  const startYr = parseInt(earliest.slice(0, 4));
-  const startMo = parseInt(earliest.slice(5, 7)) - 1;
-  const totalMonths = Math.max((nowYr - startYr) * 12 + (nowMo - startMo) + 1, 2);
+  if (fxHoldings.length === 0) return { series: [], fxLabels: [] };
 
-  const series: FxSeriesPoint[] = [];
-  const fxLabels: string[] = [];
-  let yr = startYr, mo = startMo;
+  const earliest = fxHoldings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), fxHoldings[0].buyDate);
+  const startYm = earliest.slice(0, 7);
+  const todayYm = new Date().toISOString().slice(0, 7);
 
-  for (let i = 0; i < totalMonths; i++) {
-    fxLabels.push(`${yr}-${String(mo + 1).padStart(2, "0")}`);
-    const t = totalMonths > 1 ? i / (totalMonths - 1) : 1;
-    const ease = t * t * (3 - 2 * t);
-    const wobFor = (val: number, seed: number) =>
-      Math.sin(i * 0.6 + seed) * (Math.abs(val) * 0.07);
+  const currentImpact: Record<string, number> = {};
+  for (const c of currencyCards) currentImpact[c.code.toLowerCase()] = Math.round(c.impact);
 
-    const point: FxSeriesPoint = { i };
-    keys.forEach((k, idx) => {
-      point[k] = Math.round(finals[k] * ease + wobFor(finals[k], idx));
-    });
-    series.push(point);
-    mo++;
-    if (mo > 11) { mo = 0; yr++; }
+  const zeroPoint: FxSeriesPoint = { i: 0 };
+  const nowPoint: FxSeriesPoint = { i: 1 };
+  for (const ccy of activeCurrencies) {
+    zeroPoint[ccy] = 0;
+    nowPoint[ccy] = currentImpact[ccy] ?? 0;
   }
 
-  const last = series[series.length - 1];
-  if (last) for (const k of keys) last[k] = finals[k];
-
-  return { series, fxLabels };
+  if (startYm === todayYm) {
+    return { series: [nowPoint], fxLabels: [todayYm] };
+  }
+  return { series: [zeroPoint, nowPoint], fxLabels: [startYm, todayYm] };
 }
