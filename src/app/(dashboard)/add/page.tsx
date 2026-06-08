@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
@@ -68,19 +68,43 @@ function ManualForm() {
     buy_fx_rate: "", notes: "",
   });
   const [fetchingFx, setFetchingFx] = useState(false);
+  const [fxAuto, setFxAuto]         = useState(false);
   const [saving, setSaving]         = useState(false);
   const [success, setSuccess]       = useState(false);
   const [error, setError]           = useState("");
+  const fxDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Auto-fetch historical FX rate when date or currency changes
+  useEffect(() => {
+    if (fxDebounce.current) clearTimeout(fxDebounce.current);
+    if (form.currency === "SGD") { set("buy_fx_rate", "1"); setFxAuto(true); return; }
+    if (form.buy_date.length < 10) return;
+
+    fxDebounce.current = setTimeout(async () => {
+      setFetchingFx(true);
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const date = form.buy_date <= today ? form.buy_date : undefined;
+        const rates = await fetchFx("SGD", date);
+        const rate = rates[form.currency];
+        if (rate) { set("buy_fx_rate", (1 / rate).toFixed(4)); setFxAuto(true); }
+      } catch { /* silent — user can still type manually */ }
+      finally { setFetchingFx(false); }
+    }, 400);
+
+    return () => { if (fxDebounce.current) clearTimeout(fxDebounce.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.buy_date, form.currency]);
+
   const handleFetchFx = async () => {
-    if (form.currency === "SGD") { set("buy_fx_rate", "1"); return; }
+    if (form.currency === "SGD") { set("buy_fx_rate", "1"); setFxAuto(true); return; }
     setFetchingFx(true);
     try {
-      const rates = await fetchFx("SGD");
+      const rates = await fetchFx("SGD", form.buy_date || undefined);
       const rate = rates[form.currency];
-      if (rate) set("buy_fx_rate", (1 / rate).toFixed(4));
+      if (rate) { set("buy_fx_rate", (1 / rate).toFixed(4)); setFxAuto(true); }
     } catch {
       setError("Could not fetch rate.");
     } finally {
@@ -164,13 +188,23 @@ function ManualForm() {
         </Field>
         <Field label="Purchase FX Rate" full>
           <div className="fx-fetch">
-            <input
-              className="inp"
-              type="number"
-              placeholder={form.currency === "SGD" ? "1.0000" : "1.3690"}
-              value={form.buy_fx_rate}
-              onChange={(e) => set("buy_fx_rate", e.target.value)}
-            />
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                className="inp"
+                type="number"
+                placeholder={form.currency === "SGD" ? "1.0000" : "1.3690"}
+                value={form.buy_fx_rate}
+                onChange={(e) => { set("buy_fx_rate", e.target.value); setFxAuto(false); }}
+                style={{ width: "100%", paddingRight: fxAuto ? "46px" : undefined }}
+              />
+              {fxAuto && (
+                <span style={{
+                  position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)",
+                  fontSize: "9px", letterSpacing: ".08em", color: "var(--gain)",
+                  fontFamily: "var(--mono)", pointerEvents: "none",
+                }}>AUTO</span>
+              )}
+            </div>
             <button className="icon-btn ghost sm" onClick={handleFetchFx} disabled={fetchingFx}>
               <Icon name="refresh" size={14} />
               <span className="ui">{fetchingFx ? "Fetching…" : "Fetch rate"}</span>

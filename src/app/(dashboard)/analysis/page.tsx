@@ -122,18 +122,10 @@ function SentDrawer({ id, name, assetType, score }: { id: string; name: string; 
         { t: `Sector flows supportive for ${assetType.toLowerCase()}`, src: "Markets", sent: "pos", ago: "2d" },
         { t: "Macro backdrop adds near-term uncertainty", src: "Macro", sent: "neg", ago: "3d" },
       ];
-      let text = "";
       try {
-        const prompt = `For a wealth-terminal design demo, invent 3 realistic-but-illustrative recent news headlines that would move market sentiment for ${name} (${assetType}). Do NOT present these as real news.\nReturn ONLY minified JSON: {"headlines":[{"t":"<=11 words","src":"<=2 word source","sent":"pos|neg|neu","ago":"like 2h or 1d"}]}`;
-        await streamAnalysis(prompt, (chunk) => { text += chunk; });
-        const a = text.indexOf("{"), b = text.lastIndexOf("}");
-        const j = JSON.parse(text.slice(a, b + 1));
-        const parsed = (j.headlines || []).slice(0, 3).map((h: Record<string, string>) => ({
-          t: String(h.t || "").trim(), src: String(h.src || "Wire").trim(),
-          sent: ["pos", "neg", "neu"].includes(h.sent) ? h.sent : "neu",
-          ago: String(h.ago || "1d").trim(),
-        })).filter((h: { t: string }) => h.t);
-        HL_CACHE[id] = parsed.length ? parsed : fallback;
+        const res = await fetch(`/api/news?symbol=${encodeURIComponent(id)}`);
+        const items = await res.json();
+        HL_CACHE[id] = Array.isArray(items) && items.length >= 1 ? items : fallback;
       } catch {
         HL_CACHE[id] = fallback;
       }
@@ -403,7 +395,17 @@ export default function AnalysisPage() {
     SENT_CACHE = res; setData(res); setLoading(false);
   };
 
-  useEffect(() => { if (!SENT_CACHE) run(); }, []);
+  useEffect(() => {
+    if (SENT_CACHE) return;
+    let live = true;
+    (async () => {
+      let res: AnalysisData;
+      try { res = await runSentimentAI(holdings); }
+      catch { res = buildFallback(holdings); }
+      if (live) { SENT_CACHE = res; setData(res); setLoading(false); }
+    })();
+    return () => { live = false; };
+  }, [holdings]);
 
   const left  = data?.items.filter((_, i) => i % 2 === 0) ?? [];
   const right = data?.items.filter((_, i) => i % 2 === 1) ?? [];

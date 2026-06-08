@@ -9,7 +9,8 @@ import { Spark } from "@/components/charts/Spark";
 import { Dumbbell } from "@/components/charts/Dumbbell";
 import { pct, rate, NF } from "@/lib/formatters";
 import { refreshHoldingPrices } from "@/lib/api-client";
-import type { HoldingRow } from "@/types/holding";
+import type { HoldingRow, GroupedHolding } from "@/types/holding";
+import { groupHoldings } from "@/lib/group-holdings";
 
 const ASSET_TYPES_EDIT = ["Equity", "ETF", "REIT", "Gold", "RE"];
 const STRAT_LABEL_EDIT: Record<string, string> = {
@@ -266,6 +267,8 @@ export default function HoldingsPage() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
+  const [groupView, setGroupView] = useState(true);
+  const [expandedTickers, setExpandedTickers] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
 
   async function handleRefresh() {
@@ -310,14 +313,39 @@ export default function HoldingsPage() {
   const sortBy = (k: SortKey) =>
     setSort((s) => ({ k, dir: s.k === k ? (-s.dir as 1 | -1) : -1 }));
 
-  let rows = holdings.filter((h) =>
+  const gKey = (g: GroupedHolding) => g.ticker !== "—" ? g.ticker : g.lots[0].id;
+  const isExpanded = (g: GroupedHolding) => q !== "" || expandedTickers.has(gKey(g));
+  const toggleGroup = (k: string) =>
+    setExpandedTickers((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+
+  function sortVal(item: { name: string; valueSGD: number; assetGain: number; fxGain: number; totalPct: number }, k: SortKey): string | number {
+    switch (k) {
+      case "name": return item.name;
+      case "valueSGD": return item.valueSGD;
+      case "assetGain": return item.assetGain;
+      case "fxGain": return item.fxGain;
+      case "totalPct": return item.totalPct;
+    }
+  }
+
+  const filteredRows = holdings.filter((h) =>
     (typeFilter === "All" || h.assetType === typeFilter) &&
     (q === "" || (h.name + h.ticker).toLowerCase().includes(q.toLowerCase()))
   );
 
-  rows = [...rows].sort((a, b) => {
-    const va = sort.k === "name" ? a.name : (a[sort.k as keyof HoldingRow] as number);
-    const vb = sort.k === "name" ? b.name : (b[sort.k as keyof HoldingRow] as number);
+  const rows = [...filteredRows].sort((a, b) => {
+    const va = sortVal(a, sort.k);
+    const vb = sortVal(b, sort.k);
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
+  });
+
+  const groups = [...groupHoldings(filteredRows)].sort((a, b) => {
+    const va = sortVal(a, sort.k);
+    const vb = sortVal(b, sort.k);
     return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
   });
 
@@ -376,6 +404,14 @@ export default function HoldingsPage() {
             </button>
           ))}
         </div>
+        <button
+          className={"icon-btn ghost" + (groupView ? " gview-active" : "")}
+          onClick={() => setGroupView((v) => !v)}
+          title={groupView ? "Switch to flat view" : "Switch to grouped view"}
+        >
+          <Icon name={groupView ? "layers" : "list"} size={15} />
+          <span className="ui">{groupView ? "Grouped" : "Flat"}</span>
+        </button>
         <button className="icon-btn ghost" onClick={handleCsvExport}>
           <Icon name="download" size={15} />
           <span className="ui">CSV</span>
@@ -404,42 +440,117 @@ export default function HoldingsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((h) => {
-              const sel = picked.has(key(h));
-              const total = h.assetGain + h.fxGain;
-              const strat = STRAT[h.strategy] ?? { label: h.strategy, cls: "st-gray" };
-              return (
-                <tr key={key(h)} className={"hrow" + (sel ? " sel" : "")} onClick={() => toggle(h)}>
-                  <td>
-                    <div className="cell-name">
-                      <span className="row-ic"><Icon name={h.icon as never} size={15} /></span>
-                      <span className="ui">{h.name}</span>
-                      <span className="mono ticker">{h.ticker}</span>
-                    </div>
-                  </td>
-                  <td><span className="ui dim">{h.assetType}</span></td>
-                  <td><span className="ui dim">{h.broker}</span></td>
-                  <td><span className={"strat " + strat.cls}>{strat.label}</span></td>
-                  <td className="r mono">{fmtVal(h.valueSGD)}</td>
-                  <td className="r mono" style={{ color: "var(--gain)" }}>{fmtSigned(h.assetGain)}</td>
-                  <td
-                    className="r mono"
-                    style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}
-                  >
-                    {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
-                  </td>
-                  <td className="r mono bold" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                    {pct(h.totalPct)}
-                  </td>
-                  <td>
-                    <span className="ccy-mini">
-                      {h.flag} <span className="mono dim">{h.currency}</span>
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 && (
+            {groupView
+              ? groups.flatMap((group) => {
+                  const gk = gKey(group);
+                  const isMulti = group.lots.length > 1;
+                  const expanded = isExpanded(group);
+                  const gTotal = group.assetGain + group.fxGain;
+                  const gStrat = STRAT[group.lots[0].strategy] ?? { label: group.lots[0].strategy, cls: "st-gray" };
+
+                  const groupRow = (
+                    <tr
+                      key={gk}
+                      className={"hrow" + (isMulti ? " group-hd" : "") + (!isMulti && picked.has(group.lots[0].id) ? " sel" : "")}
+                      onClick={() => isMulti ? toggleGroup(gk) : toggle(group.lots[0])}
+                    >
+                      <td>
+                        <div className="cell-name">
+                          {isMulti && (
+                            <span className="group-chevron" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
+                              <Icon name="chevron" size={14} />
+                            </span>
+                          )}
+                          <span className="row-ic"><Icon name={group.icon as never} size={15} /></span>
+                          <span className="ui" style={isMulti ? { fontWeight: 600 } : undefined}>{group.name}</span>
+                          {group.ticker !== "—" && <span className="mono ticker">{group.ticker}</span>}
+                          {isMulti && <span className="lots-badge">{group.lots.length} lots</span>}
+                        </div>
+                      </td>
+                      <td><span className="ui dim">{group.assetType}</span></td>
+                      <td><span className="ui dim">{group.lots[0].broker}</span></td>
+                      <td><span className={"strat " + gStrat.cls}>{gStrat.label}</span></td>
+                      <td className="r mono">{fmtVal(group.valueSGD)}</td>
+                      <td className="r mono" style={{ color: group.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(group.assetGain)}</td>
+                      <td className="r mono" style={{ color: group.fxGain > 0 ? "var(--fx-positive)" : group.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                        {group.fxGain === 0 ? "—" : fmtSigned(group.fxGain)}
+                      </td>
+                      <td className="r mono bold" style={{ color: gTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(group.totalPct)}</td>
+                      <td>
+                        <span className="ccy-mini">
+                          {group.flag} <span className="mono dim">{group.currency}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+
+                  if (!isMulti || !expanded) return [groupRow];
+
+                  const lotRows = group.lots.map((h) => {
+                    const sel = picked.has(h.id);
+                    const lotTotal = h.assetGain + h.fxGain;
+                    const lStrat = STRAT[h.strategy] ?? { label: h.strategy, cls: "st-gray" };
+                    return (
+                      <tr
+                        key={h.id}
+                        className={"hrow lot-row" + (sel ? " sel" : "")}
+                        onClick={(e) => { e.stopPropagation(); toggle(h); }}
+                      >
+                        <td>
+                          <div className="cell-name lot-indent">
+                            <span className="lot-connector" />
+                            <span className="ui dim">{h.buyDate}</span>
+                            <span className="mono dim">· {h.units.toLocaleString()} units</span>
+                          </div>
+                        </td>
+                        <td><span className="ui dim">{h.assetType}</span></td>
+                        <td><span className="ui dim">{h.broker}</span></td>
+                        <td><span className={"strat " + lStrat.cls}>{lStrat.label}</span></td>
+                        <td className="r mono">{fmtVal(h.valueSGD)}</td>
+                        <td className="r mono" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(h.assetGain)}</td>
+                        <td className="r mono" style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                          {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
+                        </td>
+                        <td className="r mono bold" style={{ color: lotTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
+                        <td />
+                      </tr>
+                    );
+                  });
+
+                  return [groupRow, ...lotRows];
+                })
+              : rows.map((h) => {
+                  const sel = picked.has(key(h));
+                  const total = h.assetGain + h.fxGain;
+                  const strat = STRAT[h.strategy] ?? { label: h.strategy, cls: "st-gray" };
+                  return (
+                    <tr key={key(h)} className={"hrow" + (sel ? " sel" : "")} onClick={() => toggle(h)}>
+                      <td>
+                        <div className="cell-name">
+                          <span className="row-ic"><Icon name={h.icon as never} size={15} /></span>
+                          <span className="ui">{h.name}</span>
+                          <span className="mono ticker">{h.ticker}</span>
+                        </div>
+                      </td>
+                      <td><span className="ui dim">{h.assetType}</span></td>
+                      <td><span className="ui dim">{h.broker}</span></td>
+                      <td><span className={"strat " + strat.cls}>{strat.label}</span></td>
+                      <td className="r mono">{fmtVal(h.valueSGD)}</td>
+                      <td className="r mono" style={{ color: "var(--gain)" }}>{fmtSigned(h.assetGain)}</td>
+                      <td className="r mono" style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                        {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
+                      </td>
+                      <td className="r mono bold" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
+                      <td>
+                        <span className="ccy-mini">
+                          {h.flag} <span className="mono dim">{h.currency}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+            }
+            {(groupView ? groups : rows).length === 0 && (
               <tr>
                 <td colSpan={9} style={{ textAlign: "center", padding: "32px 0" }}>
                   <span className="ui muted">No holdings match.</span>

@@ -39,3 +39,21 @@ export interface HoldingRow extends Holding {
   totalPct: number;
   detail: HoldingDetail;
 }
+
+export interface GroupedHolding {
+  ticker: string;
+  name: string;
+  assetType: string;
+  currency: string;
+  flag: string;
+  icon: string;
+  lots: HoldingRow[];
+  totalUnits: number;
+  valueSGD: number;
+  costSGD: number;
+  assetGain: number;
+  fxGain: number;
+  totalPct: number;
+  currentPrice: number;
+  sparkData: number[];
+}
