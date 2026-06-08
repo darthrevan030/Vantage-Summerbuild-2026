@@ -43,3 +43,6 @@ next-env.d.ts
 .playwright-mcp
 
 .mcp.json
+
+# AI session memory (remember plugin)
+.remember/
