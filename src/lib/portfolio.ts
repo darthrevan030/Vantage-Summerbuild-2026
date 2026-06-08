@@ -91,6 +91,10 @@ export function computeAllocationByGeo(holdings: HoldingRow[]): AllocationSlice[
     AUD: "Australia",
     GBP: "United Kingdom",
     INR: "India",
+    HKD: "Hong Kong",
+    JPY: "Japan",
+    CNY: "China",
+    CNH: "China",
   };
   const totals: Record<string, number> = {};
   const grandTotal = holdings.reduce((s, h) => s + h.valueSGD, 0);
