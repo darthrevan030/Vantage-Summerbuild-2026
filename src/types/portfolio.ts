@@ -41,3 +41,17 @@ export interface AllocationSlice {
   value: number;
   color: string;
 }
+
+export interface PortfolioSeriesPoint {
+  label: string;
+  v: number;
+}
+
+export interface FxSeriesPoint {
+  [key: string]: number;
+  i: number;
+  usd: number;
+  eur: number;
+  aud: number;
+  inr: number;
+}

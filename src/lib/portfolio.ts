@@ -5,6 +5,8 @@ import type {
   CurrencyCard,
   WaterfallItem,
   AllocationSlice,
+  PortfolioSeriesPoint,
+  FxSeriesPoint,
 } from "@/types/portfolio";
 import {
   computeCurrentValueSGD,
@@ -127,4 +129,54 @@ export function computeWaterfall(cards: CurrencyCard[]): WaterfallItem[] {
     value: Math.round(c.impact),
     dir: c.impact >= 0 ? "pos" : "neg",
   }));
+}
+
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function generatePortfolioSeries(total: number): PortfolioSeriesPoint[] {
+  const start = total * 0.82;
+  const series: PortfolioSeriesPoint[] = [];
+  let yr = 2023, mo = 0;
+  for (let i = 0; i < 42; i++) {
+    const t = i / 41;
+    const trend = start + (total - start) * (t * 0.55 + Math.pow(t, 1.7) * 0.45);
+    const wob = Math.sin(i * 0.7) * (total * 0.013) + Math.sin(i * 1.9 + 1) * (total * 0.007) + Math.sin(i * 0.33) * (total * 0.009);
+    const v = Math.round((trend + wob) / 100) * 100;
+    series.push({ label: `${MON[mo]} ${String(yr).slice(2)}`, v });
+    mo++;
+    if (mo > 11) { mo = 0; yr++; }
+  }
+  series[series.length - 1].v = Math.round(total);
+  return series;
+}
+
+export function generateFxSeries(currencyCards: CurrencyCard[]): FxSeriesPoint[] {
+  const finals: Record<string, number> = { usd: 0, eur: 0, aud: 0, inr: 0 };
+  for (const c of currencyCards) {
+    const key = c.code.toLowerCase();
+    if (key in finals) finals[key] = Math.round(c.impact);
+  }
+
+  const series: FxSeriesPoint[] = [];
+  for (let i = 0; i < 42; i++) {
+    const t = i / 41;
+    const ease = t * t * (3 - 2 * t); // smoothstep
+    const wobFor = (val: number, seed: number) =>
+      Math.sin(i * 0.6 + seed) * (Math.abs(val) * 0.07);
+    series.push({
+      i,
+      usd: Math.round(finals.usd * ease + wobFor(finals.usd, 0)),
+      eur: Math.round(finals.eur * ease + wobFor(finals.eur, 1)),
+      aud: Math.round(finals.aud * ease + wobFor(finals.aud, 2)),
+      inr: Math.round(finals.inr * ease + wobFor(finals.inr, 3)),
+    });
+  }
+  // pin last point to exact finals
+  const last = series[series.length - 1];
+  last.usd = finals.usd;
+  last.eur = finals.eur;
+  last.aud = finals.aud;
+  last.inr = finals.inr;
+
+  return series;
 }

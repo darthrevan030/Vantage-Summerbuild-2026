@@ -1,11 +1,363 @@
 "use client";
 
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { Icon } from "@/components/Icon";
+import { fetchFx } from "@/lib/api-client";
+
+const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE"];
+const STRATEGIES  = ["long_term", "active", "speculative", "physical"];
+const CURRENCIES  = ["SGD", "USD", "EUR", "AUD", "GBP", "INR"];
+
+const STRAT_LABEL: Record<string, string> = {
+  long_term: "Long Term", active: "Active", speculative: "Speculative", physical: "Physical",
+};
+
+const CCY_FLAGS: Record<string, string> = {
+  SGD: "🇸🇬", USD: "🇺🇸", EUR: "🇪🇺", AUD: "🇦🇺", GBP: "🇬🇧", INR: "🇮🇳",
+};
+
+const TYPE_ICON: Record<string, string> = {
+  Equity: "briefcase", ETF: "layers", REIT: "landmark", Gold: "gem", RE: "building",
+};
+
+// ---- reusable field/select primitives ----
+function Field({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={"field" + (full ? " full" : "")}>
+      <span className="ui field-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function NativeSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
+  return (
+    <div className="select" style={{ position: "relative" }}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
+      >
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <span className="ui">{value}</span>
+      <Icon name="chevron" size={14} />
+    </div>
+  );
+}
+
+// ---- CSV column mapper ----
+interface CsvRow { [key: string]: string }
+
+const CSV_FIELD_MAP: Record<string, string> = {
+  Name: "name", "Asset Name": "name", "Stock Name": "name",
+  Ticker: "ticker", Symbol: "ticker",
+  "Asset Type": "asset_type", Type: "asset_type",
+  Strategy: "strategy",
+  Broker: "broker",
+  Units: "units", Qty: "units", Quantity: "units", Shares: "units",
+  Currency: "currency", CCY: "currency",
+  "Purchase Price": "buy_price", "Buy Price": "buy_price", Price: "buy_price",
+  "Purchase Date": "buy_date", "Date Bought": "buy_date", Date: "buy_date",
+  "FX Rate": "buy_fx_rate", "Purchase FX Rate": "buy_fx_rate",
+};
+
+function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const rows = lines.slice(1).map((line) => {
+    const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
+  });
+  return { headers, rows };
+}
+
+// ---- manual entry form ----
+function ManualForm() {
+  const router = useRouter();
+  const [form, setForm] = useState({
+    name: "", ticker: "", asset_type: "Equity", strategy: "long_term",
+    broker: "", units: "", currency: "USD", buy_price: "",
+    buy_date: new Date().toISOString().slice(0, 10),
+    buy_fx_rate: "", notes: "",
+  });
+  const [fetchingFx, setFetchingFx] = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [success, setSuccess]       = useState(false);
+  const [error, setError]           = useState("");
+
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleFetchFx = async () => {
+    if (form.currency === "SGD") { set("buy_fx_rate", "1"); return; }
+    setFetchingFx(true);
+    try {
+      const rates = await fetchFx("SGD");
+      const rate = rates[form.currency];
+      if (rate) set("buy_fx_rate", (1 / rate).toFixed(4));
+    } catch {
+      setError("Could not fetch rate.");
+    } finally {
+      setFetchingFx(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    setError(""); setSaving(true);
+    try {
+      const payload = {
+        ticker:          form.ticker || "—",
+        name:            form.name,
+        asset_type:      form.asset_type,
+        broker:          form.broker,
+        strategy:        form.strategy,
+        units:           parseFloat(form.units),
+        currency:        form.currency,
+        flag:            CCY_FLAGS[form.currency] ?? "🌐",
+        icon:            TYPE_ICON[form.asset_type] ?? "briefcase",
+        buy_price:       parseFloat(form.buy_price),
+        buy_date:        form.buy_date,
+        buy_fx_rate:     parseFloat(form.buy_fx_rate || "1"),
+        current_price:   parseFloat(form.buy_price),
+        current_fx_rate: parseFloat(form.buy_fx_rate || "1"),
+        spark_data:      [parseFloat(form.buy_price)],
+        notes:           form.notes || null,
+      };
+      const res = await fetch("/api/holdings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? "Save failed"); }
+      setSuccess(true);
+      router.refresh();
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card reveal">
+      <div className="card-head">
+        <span className="card-title">Manual Entry</span>
+        <span className="ui muted">add a position</span>
+      </div>
+      <div className="form">
+        <Field label="Asset Name" full>
+          <input className="inp" placeholder="e.g. Microsoft Corp." value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </Field>
+        <Field label="Ticker">
+          <input className="inp" placeholder="MSFT" value={form.ticker} onChange={(e) => set("ticker", e.target.value.toUpperCase())} />
+        </Field>
+        <Field label="Asset Type">
+          <NativeSelect value={form.asset_type} options={ASSET_TYPES} onChange={(v) => set("asset_type", v)} />
+        </Field>
+        <Field label="Strategy">
+          <NativeSelect value={STRAT_LABEL[form.strategy]} options={Object.values(STRAT_LABEL)} onChange={(v) => {
+            const k = Object.entries(STRAT_LABEL).find(([, lbl]) => lbl === v)?.[0] ?? "long_term";
+            set("strategy", k);
+          }} />
+        </Field>
+        <Field label="Broker / Custodian">
+          <input className="inp" placeholder="Tiger" value={form.broker} onChange={(e) => set("broker", e.target.value)} />
+        </Field>
+        <Field label="Units">
+          <input className="inp" type="number" placeholder="100" value={form.units} onChange={(e) => set("units", e.target.value)} />
+        </Field>
+        <Field label="Currency">
+          <NativeSelect value={CCY_FLAGS[form.currency] + " " + form.currency} options={CURRENCIES.map((c) => CCY_FLAGS[c] + " " + c)} onChange={(v) => set("currency", v.split(" ")[1])} />
+        </Field>
+        <Field label="Purchase Price">
+          <input className="inp" type="number" placeholder="412.50" value={form.buy_price} onChange={(e) => set("buy_price", e.target.value)} />
+        </Field>
+        <Field label="Purchase Date">
+          <input className="inp" type="date" value={form.buy_date} onChange={(e) => set("buy_date", e.target.value)} />
+        </Field>
+        <Field label="Purchase FX Rate" full>
+          <div className="fx-fetch">
+            <input
+              className="inp"
+              type="number"
+              placeholder={form.currency === "SGD" ? "1.0000" : "1.3690"}
+              value={form.buy_fx_rate}
+              onChange={(e) => set("buy_fx_rate", e.target.value)}
+            />
+            <button className="icon-btn ghost sm" onClick={handleFetchFx} disabled={fetchingFx}>
+              <Icon name="refresh" size={14} />
+              <span className="ui">{fetchingFx ? "Fetching…" : "Fetch rate"}</span>
+            </button>
+          </div>
+        </Field>
+        <Field label="Notes" full>
+          <input className="inp" placeholder="optional" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+        </Field>
+
+        {error && <div className="ui" style={{ color: "var(--loss)", gridColumn: "1 / -1" }}>{error}</div>}
+        {success && <div className="ui" style={{ color: "var(--gain)", gridColumn: "1 / -1" }}>Holding added successfully!</div>}
+
+        <button className="btn-gold" onClick={handleSubmit} disabled={saving || !form.name || !form.buy_price}>
+          <Icon name="plus" size={16} />
+          {saving ? "Saving…" : "Add Holding"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- import & backup panel ----
+function ImportPanel() {
+  const router       = useRouter();
+  const fileRef      = useRef<HTMLInputElement>(null);
+  const [drag, setDrag]     = useState(false);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows]       = useState<CsvRow[]>([]);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [importing, setImporting] = useState(false);
+  const [result, setResult]       = useState("");
+
+  const handleFile = (file: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const parsed = parseCsv(text);
+      setHeaders(parsed.headers);
+      setRows(parsed.rows);
+      // auto-map known column names
+      const autoMap: Record<string, string> = {};
+      for (const h of parsed.headers) {
+        const target = CSV_FIELD_MAP[h];
+        if (target) autoMap[h] = target;
+      }
+      setMapping(autoMap);
+      setResult("");
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDrag(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleImport = async () => {
+    setImporting(true); setResult("");
+    let ok = 0, fail = 0;
+    for (const row of rows) {
+      const name = row[Object.entries(mapping).find(([, v]) => v === "name")?.[0] ?? ""] ?? "";
+      const ticker = row[Object.entries(mapping).find(([, v]) => v === "ticker")?.[0] ?? ""] ?? "—";
+      const asset_type = row[Object.entries(mapping).find(([, v]) => v === "asset_type")?.[0] ?? ""] || "Equity";
+      const buy_price = parseFloat(row[Object.entries(mapping).find(([, v]) => v === "buy_price")?.[0] ?? ""] ?? "0");
+      const buy_date = row[Object.entries(mapping).find(([, v]) => v === "buy_date")?.[0] ?? ""] || new Date().toISOString().slice(0, 10);
+      const units = parseFloat(row[Object.entries(mapping).find(([, v]) => v === "units")?.[0] ?? ""] ?? "0");
+      const currency = row[Object.entries(mapping).find(([, v]) => v === "currency")?.[0] ?? ""] || "SGD";
+      if (!name || !buy_price) { fail++; continue; }
+      try {
+        const res = await fetch("/api/holdings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name, ticker: ticker || "—", asset_type, broker: "Imported", strategy: "long_term",
+            units: units || 1, currency, flag: CCY_FLAGS[currency] ?? "🌐",
+            icon: TYPE_ICON[asset_type] ?? "briefcase",
+            buy_price, buy_date, buy_fx_rate: 1, current_price: buy_price, current_fx_rate: 1,
+            spark_data: [buy_price],
+          }),
+        });
+        if (res.ok) ok++; else fail++;
+      } catch { fail++; }
+    }
+    setResult(`Imported ${ok} holding${ok !== 1 ? "s" : ""}${fail > 0 ? ` · ${fail} failed` : ""}.`);
+    setImporting(false);
+    if (ok > 0) router.refresh();
+  };
+
+  const FIELD_OPTIONS = ["(ignore)", "name", "ticker", "asset_type", "strategy", "broker", "units", "currency", "buy_price", "buy_date", "buy_fx_rate"];
+
+  return (
+    <div className="card reveal" style={{ animationDelay: ".06s" }}>
+      <div className="card-head">
+        <span className="card-title">Import &amp; Backup</span>
+        <span className="ui muted">CSV · XLSX · JSON</span>
+      </div>
+
+      <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+
+      <div
+        className={"dropzone" + (drag ? " over" : "")}
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={handleDrop}
+        onClick={() => fileRef.current?.click()}
+        style={{ cursor: "pointer" }}
+      >
+        <Icon name="upload" size={26} style={{ color: "var(--gold)" }} />
+        <div className="dz-title ui">Drop CSV here</div>
+        <div className="ui muted">or click to browse</div>
+        <div className="ui muted xs dz-sup">Supported: Tiger · Saxo · DBS Vickers · IBKR · Moomoo</div>
+      </div>
+
+      {headers.length > 0 && (
+        <div className="mapping">
+          <div className="map-head ui muted">
+            <span>Your Column</span><span>Maps To</span>
+          </div>
+          {headers.map((h) => (
+            <div className="map-row" key={h}>
+              <span className="mono map-from">&quot;{h}&quot;</span>
+              <Icon name="arrow" size={13} className="map-arrow" />
+              <div className="select" style={{ position: "relative" }}>
+                <select
+                  value={mapping[h] ?? "(ignore)"}
+                  onChange={(e) => setMapping((m) => ({ ...m, [h]: e.target.value }))}
+                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
+                >
+                  {FIELD_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <span className="ui">{mapping[h] ?? "(ignore)"}</span>
+                <Icon name="chevron" size={14} />
+              </div>
+            </div>
+          ))}
+          <div className="map-ok ui">
+            <Icon name="check" size={13} style={{ color: "var(--gain)" }} />
+            {Object.values(mapping).filter((v) => v !== "(ignore)").length} of {headers.length} columns mapped
+          </div>
+          {result && <div className="ui" style={{ color: result.includes("failed") ? "var(--loss)" : "var(--gain)", marginTop: 8 }}>{result}</div>}
+          <button className="btn-gold" style={{ marginTop: 8 }} onClick={handleImport} disabled={importing || rows.length === 0}>
+            <Icon name="upload" size={15} />
+            {importing ? "Importing…" : `Import ${rows.length} rows`}
+          </button>
+        </div>
+      )}
+
+      <div className="backup">
+        <button className="icon-btn outline" onClick={() => {
+          fetch("/api/holdings").then((r) => r.json()).then((data) => {
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+            const a = document.createElement("a"); a.href = url; a.download = "portfolio-backup.json"; a.click();
+            URL.revokeObjectURL(url);
+          });
+        }}>
+          <Icon name="download" size={15} />Export JSON
+        </button>
+      </div>
+      <div className="ui muted xs privacy">Your data is stored in Supabase — export anytime to keep a local copy.</div>
+    </div>
+  );
+}
+
 export default function AddPage() {
   return (
     <div className="tab-body">
-      <div className="card">
-        <div className="card-head"><span className="card-title">Add / Import</span><span className="ui muted">coming soon</span></div>
-        <div className="sk" style={{ height: 300 }} />
+      <div className="add-grid">
+        <ManualForm />
+        <ImportPanel />
       </div>
     </div>
   );

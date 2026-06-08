@@ -2,13 +2,34 @@
 
 import { createContext, useContext } from "react";
 import type { HoldingRow } from "@/types/holding";
-import type { HeroStats, AllocationSlice } from "@/types/portfolio";
+import type {
+  HeroStats,
+  AllocationSlice,
+  MoverItem,
+  CurrencyCard,
+  WaterfallItem,
+  PortfolioSeriesPoint,
+  FxSeriesPoint,
+} from "@/types/portfolio";
+
+export const FX_COLORS: Record<string, string> = {
+  usd: "#6fb0ff",
+  eur: "#46d8a0",
+  aud: "#f0bd8a",
+  inr: "#b79cff",
+};
 
 interface PortfolioContextValue {
   holdings: HoldingRow[];
   hero: HeroStats;
   assetAllocation: AllocationSlice[];
   geoAllocation: AllocationSlice[];
+  movers: { gainers: MoverItem[]; losers: MoverItem[] };
+  currencyCards: CurrencyCard[];
+  waterfallData: WaterfallItem[];
+  portfolioSeries: PortfolioSeriesPoint[];
+  fxSeries: FxSeriesPoint[];
+  fxColors: Record<string, string>;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
