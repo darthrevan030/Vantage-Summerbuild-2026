@@ -181,6 +181,46 @@ function ymLabel(ym: string): string {
   return `${MON[mo]} ${String(yr).slice(2)}`;
 }
 
+/** Label for a daily "YYYY-MM-DD" date. Shows "Jun 3" for current year, "Jul 23" for past years. */
+function dateLabel(date: string): string {
+  const yr = parseInt(date.slice(0, 4));
+  const mo = parseInt(date.slice(5, 7)) - 1;
+  const dy = parseInt(date.slice(8, 10));
+  const thisYear = new Date().getFullYear();
+  return yr === thisYear ? `${MON[mo]} ${dy}` : `${MON[mo]} ${String(yr).slice(2)}`;
+}
+
+/** Builds portfolio value series with one point per daily snapshot (for 1D/1W chart granularity). */
+export function generatePortfolioSeriesDaily(
+  snapshots: SnapshotRow[],
+  holdings: HoldingRow[] = []
+): PortfolioSeriesPoint[] {
+  if (holdings.length === 0) return [];
+  const earliest = holdings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), holdings[0].buyDate);
+  const startDate = earliest.slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const totalCost = Math.round(holdings.reduce((s, h) => s + h.costSGD, 0));
+  const totalValue = Math.round(holdings.reduce((s, h) => s + h.valueSGD, 0));
+
+  if (snapshots.length > 0) {
+    const byDate = new Map<string, SnapshotRow>();
+    for (const s of snapshots) byDate.set(s.recordedDate, s);
+    const points = Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, s]) => ({ label: dateLabel(date), date, v: Math.round(s.valueSgd) }));
+    if (points.length < 2 && startDate < (points[0]?.date ?? today)) {
+      points.unshift({ label: dateLabel(startDate), date: startDate, v: totalCost });
+    }
+    return points;
+  }
+
+  if (startDate >= today) return [];
+  return [
+    { label: dateLabel(startDate), date: startDate, v: totalCost },
+    { label: dateLabel(today), date: today, v: totalValue },
+  ];
+}
+
 function snapshotsByMonth(snapshots: SnapshotRow[]): Map<string, SnapshotRow> {
   const byMonth = new Map<string, SnapshotRow>();
   for (const s of snapshots) byMonth.set(s.recordedDate.slice(0, 7), s);

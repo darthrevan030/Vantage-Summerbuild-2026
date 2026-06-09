@@ -7,16 +7,18 @@ import { Legend } from "@/components/charts/Legend";
 import { AreaTrend } from "@/components/charts/AreaTrend";
 import { FXArea } from "@/components/charts/FXArea";
 import { pct } from "@/lib/formatters";
-import { useDateRange, RANGES } from "@/lib/useDateRange";
+import { useDateRange, RANGES, RANGES_DAILY } from "@/lib/useDateRange";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 
 function RangeBar({
+  ranges,
   activePreset,
   showCustom,
   onPreset,
   onCustomToggle,
 }: {
+  ranges: [string, number][];
   activePreset: number;
   showCustom: boolean;
   onPreset: (n: number) => void;
@@ -25,7 +27,7 @@ function RangeBar({
   return (
     <div className="chart-range-row">
       <div className="rsel">
-        {RANGES.map(([lab, n], i) => (
+        {ranges.map(([lab, n], i) => (
           <button
             key={lab}
             className={"rseg" + (i === activePreset ? " active" : "")}
@@ -46,7 +48,7 @@ function RangeBar({
 }
 
 function PortfolioTrend() {
-  const { portfolioSeries, fmtVal, fmtSigned } = usePortfolio();
+  const { portfolioSeriesDaily, fmtVal, fmtSigned } = usePortfolio();
   const router = useRouter();
   const { toast } = useToast();
   const [backfilling, setBackfilling] = useState(false);
@@ -67,27 +69,28 @@ function PortfolioTrend() {
   };
 
   const seriesLabels = useMemo(
-    () => portfolioSeries.map((p) => p.date),
+    () => portfolioSeriesDaily.map((p) => p.date),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [portfolioSeries.length]
+    [portfolioSeriesDaily.length]
   );
 
   const {
-    startDate, endDate, minDate, maxDate,
+    startDate, endDate,
     activePreset, showCustom,
     selectPreset, handleStartChange, handleEndChange, toggleCustom,
-  } = useDateRange(seriesLabels);
+  } = useDateRange(seriesLabels, RANGES_DAILY);
 
   const data = useMemo(() => {
+    // Normalise a YYYY-MM endDate to end-of-month so it includes all daily points in that month
+    const endCmp = endDate.length === 7 ? endDate + "-31" : endDate;
     const si = seriesLabels.findIndex((l) => l >= startDate);
-    const ei = [...seriesLabels].reverse().findIndex((l) => l <= endDate);
+    const ei = [...seriesLabels].reverse().findIndex((l) => l <= endCmp);
     const eiActual = ei < 0 ? -1 : seriesLabels.length - 1 - ei;
-    if (si < 0 || eiActual < 0 || si > eiActual) return portfolioSeries;
-    const slice = portfolioSeries.slice(si, eiActual + 1);
-    // Not enough points in range — show full series so the chart is never blank
-    if (slice.length < 2) return portfolioSeries;
+    if (si < 0 || eiActual < 0 || si > eiActual) return portfolioSeriesDaily;
+    const slice = portfolioSeriesDaily.slice(si, eiActual + 1);
+    if (slice.length < 2) return portfolioSeriesDaily;
     return slice;
-  }, [portfolioSeries, seriesLabels, startDate, endDate]);
+  }, [portfolioSeriesDaily, seriesLabels, startDate, endDate]);
 
   const first = data[0];
   const last  = data[data.length - 1];
@@ -107,13 +110,21 @@ function PortfolioTrend() {
     <div className="card chart-card reveal" style={{ animationDelay: ".04s" }}>
       <div className="card-head">
         <span className="card-title">Portfolio Value Over Time</span>
-        {portfolioSeries.length < 30 && (
-          <button className="icon-btn ghost sm" onClick={handleBackfill} disabled={backfilling}>
-            {backfilling ? "Loading…" : "Load history"}
-          </button>
-        )}
+        {(() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const latest = portfolioSeriesDaily[portfolioSeriesDaily.length - 1]?.date ?? "";
+          const needsSync = portfolioSeriesDaily.length < 30 || latest < today;
+          if (!needsSync) return null;
+          const label = portfolioSeriesDaily.length < 30 ? "Load history" : "Sync to today";
+          return (
+            <button className="icon-btn ghost sm" onClick={handleBackfill} disabled={backfilling}>
+              {backfilling ? "Loading…" : label}
+            </button>
+          );
+        })()}
       </div>
       <RangeBar
+        ranges={RANGES_DAILY}
         activePreset={activePreset}
         showCustom={showCustom}
         onPreset={selectPreset}
@@ -123,12 +134,12 @@ function PortfolioTrend() {
         <div className="date-range-row">
           <div className="date-field">
             <label className="date-label ui muted xs">From</label>
-            <input type="month" className="date-inp mono" value={startDate} onChange={(e) => handleStartChange(e.target.value)} />
+            <input type="month" className="date-inp mono" value={startDate.slice(0, 7)} onChange={(e) => handleStartChange(e.target.value)} />
           </div>
           <span className="date-sep ui muted">—</span>
           <div className="date-field">
             <label className="date-label ui muted xs">To</label>
-            <input type="month" className="date-inp mono" value={endDate} onChange={(e) => handleEndChange(e.target.value)} />
+            <input type="month" className="date-inp mono" value={endDate.slice(0, 7)} onChange={(e) => handleEndChange(e.target.value)} />
           </div>
           <button className="date-reset ui muted" onClick={() => selectPreset(999)}>Reset</button>
         </div>
@@ -214,6 +225,7 @@ function FXImpactCard() {
       {fxSeries.length > 0 ? (
         <>
           <RangeBar
+            ranges={RANGES}
             activePreset={activePreset}
             showCustom={showCustom}
             onPreset={selectPreset}

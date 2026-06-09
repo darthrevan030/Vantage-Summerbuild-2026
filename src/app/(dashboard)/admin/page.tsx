@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { RoleToggle } from "./RoleToggle";
 import { CurrencyToggle } from "./CurrencyToggle";
+import { ExchangeToggle } from "./ExchangeToggle";
 import type { CurrencyRow } from "@/app/api/currencies/route";
+import type { ExchangeRow } from "@/app/api/exchanges/route";
 
 interface AdminUserRow {
   id: string;
@@ -51,6 +53,7 @@ export default async function AdminPage() {
     { data: staleRows },
     { count: staleCount },
     { data: currencyRows },
+    { data: exchangeRows },
   ] = await Promise.all([
     adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     supabase.from("user_settings").select("user_id, display_name, role"),
@@ -68,6 +71,10 @@ export default async function AdminPage() {
     supabase
       .from("currencies")
       .select("code, label, active, display_order")
+      .order("display_order"),
+    supabase
+      .from("exchanges")
+      .select("code, label, region, active, display_order")
       .order("display_order"),
   ]);
 
@@ -248,6 +255,21 @@ export default async function AdminPage() {
         <div>
           {(currencyRows ?? []).map((c: CurrencyRow) => (
             <CurrencyToggle key={c.code} currency={c} />
+          ))}
+        </div>
+      </div>
+
+      {/* Exchange editor */}
+      <div className="card reveal" style={{ animationDelay: ".24s" }}>
+        <div className="card-head">
+          <span className="card-title">Supported Exchanges</span>
+          <span className="ui muted">
+            {(exchangeRows ?? []).filter((e: ExchangeRow) => e.active).length} active
+          </span>
+        </div>
+        <div>
+          {(exchangeRows ?? []).map((e: ExchangeRow) => (
+            <ExchangeToggle key={e.code} exchange={e} />
           ))}
         </div>
       </div>

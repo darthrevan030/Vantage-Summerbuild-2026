@@ -22,6 +22,7 @@ interface PortfolioContextValue {
   currencyCards: CurrencyCard[];
   waterfallData: WaterfallItem[];
   portfolioSeries: PortfolioSeriesPoint[];
+  portfolioSeriesDaily: PortfolioSeriesPoint[];
   fxSeries: FxSeriesPoint[];
   fxLabels: string[];
   fxColors: Record<string, string>;

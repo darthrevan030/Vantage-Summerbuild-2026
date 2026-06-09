@@ -179,7 +179,7 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
         <div className="math-row">
           <span className="ui">Purchase</span>
           <span className="mono">
-            {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? fmtVal(d.buyPx) : NF(d.buyPx, 2) + " " + d.ccy}
+            {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? "S$" + NF(d.buyPx, 2) : NF(d.buyPx, 2) + " " + d.ccy}
           </span>
         </div>
         <div className="math-row sub">
@@ -191,7 +191,7 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
         <div className="math-row">
           <span className="ui">Current</span>
           <span className="mono">
-            {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? fmtVal(d.curPx) : NF(d.curPx, 2) + " " + d.ccy}
+            {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? "S$" + NF(d.curPx, 2) : NF(d.curPx, 2) + " " + d.ccy}
           </span>
         </div>
         {d.ccy !== "SGD" && (

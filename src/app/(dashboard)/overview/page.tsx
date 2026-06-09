@@ -118,7 +118,7 @@ export default function OverviewPage() {
             <div className="ab-seg" style={{ flex: Math.max(hero.fxImpact, 0), background: "var(--fx-positive)" }} />
           </div>
           <div className="attr-rows">
-            <div className="attr-item"><i style={{ background: "var(--gain)" }} /><div><div className="ui muted xs">Asset gain</div><div className="mono attr-v" style={{ color: "var(--gain)" }}>{fmtSigned(assetGain)}</div></div></div>
+            <div className="attr-item"><i style={{ background: assetGain >= 0 ? "var(--gain)" : "var(--loss)" }} /><div><div className="ui muted xs">Asset gain</div><div className="mono attr-v" style={{ color: assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(assetGain)}</div></div></div>
             <div className="attr-item"><i style={{ background: "var(--fx-positive)" }} /><div><div className="ui muted xs">FX gain</div><div className="mono attr-v" style={{ color: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>{fmtSigned(hero.fxImpact)}</div></div></div>
             <div className="attr-item total"><div><div className="ui muted xs">Total gain</div><div className="mono attr-v">{fmtSigned(hero.totalGain)} <span style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.totalGainPct)}</span></div></div></div>
           </div>

@@ -7,6 +7,7 @@ import {
   computeCurrencyCards,
   computeWaterfall,
   generatePortfolioSeries,
+  generatePortfolioSeriesDaily,
   generateFxSeries,
   buildFxColors,
   buildBaseFxRates,
@@ -31,6 +32,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const currencyCards = computeCurrencyCards(holdings);
   const waterfallData = computeWaterfall(currencyCards);
   const portfolioSeries = generatePortfolioSeries(snapshots, holdings);
+  const portfolioSeriesDaily = generatePortfolioSeriesDaily(snapshots, holdings);
   const { series: fxSeries, fxLabels } = generateFxSeries(snapshots, currencyCards, holdings);
   const fxColors = buildFxColors(currencyCards);
   const baseFxRates = buildBaseFxRates(currencyCards);
@@ -45,6 +47,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       currencyCards={currencyCards}
       waterfallData={waterfallData}
       portfolioSeries={portfolioSeries}
+      portfolioSeriesDaily={portfolioSeriesDaily}
       fxSeries={fxSeries}
       fxLabels={fxLabels}
       fxColors={fxColors}

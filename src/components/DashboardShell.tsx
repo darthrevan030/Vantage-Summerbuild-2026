@@ -28,6 +28,7 @@ interface DashboardShellProps {
   currencyCards: CurrencyCard[];
   waterfallData: WaterfallItem[];
   portfolioSeries: PortfolioSeriesPoint[];
+  portfolioSeriesDaily: PortfolioSeriesPoint[];
   fxSeries: FxSeriesPoint[];
   fxLabels: string[];
   fxColors: Record<string, string>;
@@ -41,7 +42,7 @@ interface DashboardShellProps {
 export function DashboardShell({
   holdings, hero, assetAllocation, geoAllocation,
   movers, currencyCards, waterfallData,
-  portfolioSeries, fxSeries, fxLabels, fxColors, baseFxRates,
+  portfolioSeries, portfolioSeriesDaily, fxSeries, fxLabels, fxColors, baseFxRates,
   initialDisplayName, initialBaseCurrency, initialRole,
   children,
 }: DashboardShellProps) {
@@ -54,7 +55,7 @@ export function DashboardShell({
     <PortfolioProvider value={{
       holdings, hero, assetAllocation, geoAllocation,
       movers, currencyCards, waterfallData,
-      portfolioSeries, fxSeries, fxLabels, fxColors, baseFxRates,
+      portfolioSeries, portfolioSeriesDaily, fxSeries, fxLabels, fxColors, baseFxRates,
       initialDisplayName, initialBaseCurrency, initialRole,
     }}>
       <ToastProvider>

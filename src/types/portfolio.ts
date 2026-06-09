@@ -44,7 +44,7 @@ export interface AllocationSlice {
 
 export interface PortfolioSeriesPoint {
   label: string;
-  date: string;  // "YYYY-MM" — used for date-range filtering
+  date: string;  // "YYYY-MM" (monthly) or "YYYY-MM-DD" (daily) — used for date-range filtering
   v: number;
 }
 
