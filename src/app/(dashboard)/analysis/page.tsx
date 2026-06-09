@@ -24,22 +24,6 @@ const FALLBACK_ITEMS: Record<string, { score: number; summary: string; drivers: 
 };
 const FALLBACK_OVERALL = { score: 43, note: "Constructive book; rates and FX are the swing factors." };
 
-const FALLBACK_HL: Record<string, { t: string; src: string; sent: string; ago: string }[]> = {
-  AAPL:   [{ t: "Services revenue hits record as App Store momentum builds", src: "Bloomberg", sent: "pos", ago: "3h" }, { t: "Analysts trim iPhone unit estimates on China softness", src: "Reuters", sent: "neg", ago: "1d" }, { t: "New on-device AI features roll out across the lineup", src: "The Verge", sent: "pos", ago: "2d" }],
-  CICT:   [{ t: "Singapore retail rents edge higher on tourism recovery", src: "Biz Times", sent: "pos", ago: "5h" }, { t: "Office leasing slows as supply pipeline expands", src: "EdgeProp", sent: "neg", ago: "2d" }, { t: "REIT reaffirms full-year distribution guidance", src: "SGX", sent: "neu", ago: "4d" }],
-  IWDA:   [{ t: "Developed-market equities extend rally to fresh highs", src: "FT", sent: "pos", ago: "2h" }, { t: "Concentration in US mega-caps raises diversification flags", src: "Morningstar", sent: "neg", ago: "1d" }, { t: "Passive inflows accelerate into global index funds", src: "ETF.com", sent: "pos", ago: "3d" }],
-  ASML:   [{ t: "ASML order intake beats estimates on leading-edge demand", src: "Bloomberg", sent: "pos", ago: "4h" }, { t: "US widens chip export controls to more regions", src: "WSJ", sent: "neg", ago: "1d" }, { t: "EUV capacity expansion set for 2026 delivery", src: "Reuters", sent: "pos", ago: "3d" }],
-  FMG:    [{ t: "Iron ore dips on weaker-than-expected China PMI", src: "Reuters", sent: "neg", ago: "6h" }, { t: "Fortescue reaffirms green energy investment plan", src: "AFR", sent: "pos", ago: "2d" }, { t: "Dividend yield remains attractive at current price", src: "Morningstar", sent: "neu", ago: "3d" }],
-};
-
-function genericHL(h: HoldingRow) {
-  return [
-    { t: `Sentiment steady for ${h.name} into the week`, src: "Wire", sent: "neu", ago: "1d" },
-    { t: `Sector flows turn supportive for ${h.assetType.toLowerCase()}`, src: "Markets", sent: "pos", ago: "2d" },
-    { t: "Macro backdrop adds near-term uncertainty", src: "Macro", sent: "neg", ago: "3d" },
-  ];
-}
-
 // deterministic 12-pt sentiment path ending at `score`
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function sentPath(id: string, score: number) {
@@ -127,34 +111,38 @@ function ScoreRail({ score }: { score: number }) {
 }
 
 // ---- SentDrawer (headlines + 30-day trend) ----
-const HL_CACHE: Record<string, { t: string; src: string; sent: string; ago: string }[]> = {};
+type HlItem = { t: string; src: string; sent: string; ago: string };
+type HlState = HlItem[] | "loading" | "no-key" | "empty";
 
-function SentDrawer({ id, name, assetType, score, sparkData }: { id: string; name: string; assetType: string; score: number; sparkData: number[] }) {
-  const [hl, setHl]       = useState<typeof HL_CACHE[string] | null>(HL_CACHE[id] ?? null);
-  const [loading, setLoading] = useState(!HL_CACHE[id]);
+const HL_CACHE: Record<string, HlItem[]> = {};
+
+function SentDrawer({ id, name, score, sparkData }: { id: string; name: string; assetType: string; score: number; sparkData: number[] }) {
+  const [hl, setHl] = useState<HlState>(HL_CACHE[id] ?? "loading");
   const useRealPrices = sparkData.length >= 2;
   const pts   = useRealPrices ? sparkToSentPath(sparkData) : sentPath(id, score);
   const delta = useRealPrices ? (priceDelta(sparkData) ?? 0) : pts[pts.length - 1] - pts[0];
 
   useEffect(() => {
-    if (HL_CACHE[id]) return;
+    if (HL_CACHE[id]) { setHl(HL_CACHE[id]); return; }
     let live = true;
     (async () => {
-      const fallback = FALLBACK_HL[id] ?? [
-        { t: `Sentiment steady for ${name} into the week`, src: "Wire", sent: "neu", ago: "1d" },
-        { t: `Sector flows supportive for ${assetType.toLowerCase()}`, src: "Markets", sent: "pos", ago: "2d" },
-        { t: "Macro backdrop adds near-term uncertainty", src: "Macro", sent: "neg", ago: "3d" },
-      ];
       try {
         const res = await fetch(`/api/news?symbol=${encodeURIComponent(id)}`);
-        const items = await res.json();
-        HL_CACHE[id] = Array.isArray(items) && items.length >= 1 ? items : fallback;
+        const data = await res.json();
+        // API returned no-key sentinel
+        if (data && !Array.isArray(data) && data.noKey) {
+          if (live) setHl("no-key");
+          return;
+        }
+        const items: HlItem[] = Array.isArray(data) ? data.filter((n: HlItem) => n.t) : [];
+        HL_CACHE[id] = items;
+        if (live) setHl(items.length > 0 ? items : "empty");
       } catch {
-        HL_CACHE[id] = fallback;
+        if (live) setHl("empty");
       }
-      if (live) { setHl(HL_CACHE[id]); setLoading(false); }
     })();
     return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   return (
@@ -169,26 +157,30 @@ function SentDrawer({ id, name, assetType, score, sparkData }: { id: string; nam
         <MiniSpark pts={pts} color={toneFor(score)} />
       </div>
       <div className="sd-news">
-        {loading
-          ? [0, 1, 2].map((i) => (
-            <div className="hl-row" key={i}>
-              <div className="sk" style={{ width: 7, height: 7, borderRadius: "50%", marginTop: 5 }} />
-              <div className="hl-body" style={{ flex: 1, gap: 6 }}>
-                <div className="sk" style={{ height: 11, width: "88%" }} />
-                <div className="sk" style={{ height: 9, width: 70 }} />
-              </div>
+        {hl === "loading" && [0, 1, 2].map((i) => (
+          <div className="hl-row" key={i}>
+            <div className="sk" style={{ width: 7, height: 7, borderRadius: "50%", marginTop: 5 }} />
+            <div className="hl-body" style={{ flex: 1, gap: 6 }}>
+              <div className="sk" style={{ height: 11, width: "88%" }} />
+              <div className="sk" style={{ height: 9, width: 70 }} />
             </div>
-          ))
-          : (hl ?? []).map((h, i) => (
-            <div className="hl-row" key={i}>
-              <i className={"hl-dot " + h.sent} />
-              <div className="hl-body">
-                <div className="hl-t">{h.t}</div>
-                <div className="hl-meta">{h.src} · {h.ago}</div>
-              </div>
+          </div>
+        ))}
+        {hl === "no-key" && (
+          <div className="hl-empty">No <code>FINNHUB_API_KEY</code> — set it to load live headlines for {name}.</div>
+        )}
+        {hl === "empty" && (
+          <div className="hl-empty">No recent headlines found for {name}.</div>
+        )}
+        {Array.isArray(hl) && hl.map((h, i) => (
+          <div className="hl-row" key={i}>
+            <i className={"hl-dot " + h.sent} />
+            <div className="hl-body">
+              <div className="hl-t">{h.t}</div>
+              <div className="hl-meta">{h.src} · {h.ago}</div>
             </div>
-          ))
-        }
+          </div>
+        ))}
       </div>
     </div>
   );
