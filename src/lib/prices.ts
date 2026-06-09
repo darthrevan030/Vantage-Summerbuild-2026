@@ -133,19 +133,28 @@ export async function fetchLivePrices(
     })(),
 
     equities.length > 0 && process.env.EODHD_API_KEY && (async () => {
-      await Promise.all(
-        equities.map(async (ticker) => {
-          const symbol = toEohdSymbol(ticker, tickerCurrency[ticker] ?? "USD");
-          try {
-            const res = await fetch(
-              `https://eodhd.com/api/real-time/${symbol}?api_token=${process.env.EODHD_API_KEY}&fmt=json`
-            );
-            if (!res.ok) return;
-            const json = await res.json();
-            if (json.close) prices[ticker] = json.close;
-          } catch {}
-        })
-      );
+      // Build symbol → original ticker reverse map, then do one bulk call instead of N
+      const symbolToTicker: Record<string, string> = {};
+      const symbols = equities.map((ticker) => {
+        const sym = toEohdSymbol(ticker, tickerCurrency[ticker] ?? "USD");
+        symbolToTicker[sym] = ticker;
+        return sym;
+      });
+      try {
+        const [first, ...rest] = symbols;
+        const extra = rest.length > 0 ? `&s=${rest.join(",")}` : "";
+        const res = await fetch(
+          `https://eodhd.com/api/real-time/${first}?api_token=${process.env.EODHD_API_KEY}&fmt=json${extra}`
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        // Single ticker → plain object; multiple tickers → array
+        const items: { code: string; close: number }[] = Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          const ticker = symbolToTicker[item.code];
+          if (ticker && item.close) prices[ticker] = item.close;
+        }
+      } catch {}
     })(),
   ]);
 
