@@ -8,11 +8,11 @@ async function getAuthUser() {
   return user;
 }
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 function isStale(priceRefreshedAt: string | null): boolean {
   if (!priceRefreshedAt) return true;
-  return Date.now() - new Date(priceRefreshedAt).getTime() > ONE_HOUR_MS;
+  return Date.now() - new Date(priceRefreshedAt).getTime() > STALE_MS;
 }
 
 export async function POST() {

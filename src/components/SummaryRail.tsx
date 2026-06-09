@@ -33,8 +33,8 @@ export function SummaryRail() {
       <div className="sm-metrics">
         <div className="sm-metric">
           <span className="ui muted xs">Total Gain</span>
-          <span className="mono sm-v" style={{ color: "var(--gain)" }}>{fmtSigned(hero.totalGain)}</span>
-          <span className="mono sm-sub" style={{ color: "var(--gain)" }}>{pct(hero.totalGainPct)}</span>
+          <span className="mono sm-v" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(hero.totalGain)}</span>
+          <span className="mono sm-sub" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.totalGainPct)}</span>
         </div>
         <div className="sm-metric">
           <span className="ui muted xs">FX Impact</span>

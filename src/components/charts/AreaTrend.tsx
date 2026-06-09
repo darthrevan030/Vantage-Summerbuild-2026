@@ -28,6 +28,15 @@ export function AreaTrend({ data, color = "var(--gold)", height = 230, valFmt }:
   const padL = 8, padR = 8, padT = 14, padB = 26;
   const iw = w - padL - padR;
   const ih = height - padT - padB;
+
+  if (!data || data.length < 2) {
+    return (
+      <div ref={wrapRef} style={{ position: "relative", width: "100%", height, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Not enough data</span>
+      </div>
+    );
+  }
+
   const vals = data.map((d) => d.v);
   const min = Math.min(...vals) * 0.985;
   const max = Math.max(...vals) * 1.01;
@@ -46,7 +55,13 @@ export function AreaTrend({ data, color = "var(--gold)", height = 230, valFmt }:
     setHover(i);
   };
 
-  const ticks = data.filter((_, i) => i % 6 === 0 || i === data.length - 1);
+  // Fit ticks to available width — never more than floor(iw / 64px) labels
+  const maxTicks = Math.max(2, Math.floor(iw / 64));
+  const step = Math.ceil((data.length - 1) / (maxTicks - 1));
+  const ticks = data
+    .map((d, i) => ({ d, i }))
+    .filter(({ i }) => i % step === 0 || i === data.length - 1)
+    .filter(({ i }, k, arr) => k === 0 || i - arr[k - 1].i >= step * 0.5);
 
   return (
     <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
@@ -63,10 +78,12 @@ export function AreaTrend({ data, color = "var(--gold)", height = 230, valFmt }:
         })}
         <path d={area} fill="url(#areaG)" />
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
-        {ticks.map((d, k) => {
-          const i = data.indexOf(d);
+        {ticks.map(({ d, i }, k) => {
+          const isFirst = k === 0;
+          const isLast  = k === ticks.length - 1;
+          const anchor  = isFirst ? "start" : isLast ? "end" : "middle";
           return (
-            <text key={k} x={X(i)} y={height - 8} fill="var(--text-muted)" fontSize="10" textAnchor="middle" className="mono">
+            <text key={k} x={X(i)} y={height - 8} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="mono">
               {d.label}
             </text>
           );

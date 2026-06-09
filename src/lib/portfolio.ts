@@ -193,15 +193,6 @@ export function generatePortfolioSeries(
   snapshots: SnapshotRow[],
   holdings: HoldingRow[] = []
 ): PortfolioSeriesPoint[] {
-  if (snapshots.length > 0) {
-    return Array.from(snapshotsByMonth(snapshots).entries()).map(([ym, s]) => ({
-      label: ymLabel(ym),
-      date: ym,
-      v: Math.round(s.valueSgd),
-    }));
-  }
-
-  // Fallback: 2-point seed from current holdings (cost at buy date → value today)
   if (holdings.length === 0) return [];
   const earliest = holdings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), holdings[0].buyDate);
   const startYm = earliest.slice(0, 7);
@@ -209,9 +200,21 @@ export function generatePortfolioSeries(
   const totalCost = Math.round(holdings.reduce((s, h) => s + h.costSGD, 0));
   const totalValue = Math.round(holdings.reduce((s, h) => s + h.valueSGD, 0));
 
-  if (startYm === todayYm) {
-    return [{ label: ymLabel(startYm), date: startYm, v: totalValue }];
+  if (snapshots.length > 0) {
+    const points = Array.from(snapshotsByMonth(snapshots).entries()).map(([ym, s]) => ({
+      label: ymLabel(ym),
+      date: ym,
+      v: Math.round(s.valueSgd),
+    }));
+    // Only 1 snapshot month → prepend cost-at-buy-date so the chart always has ≥ 2 points
+    if (points.length < 2 && startYm < points[0]?.date) {
+      points.unshift({ label: ymLabel(startYm), date: startYm, v: totalCost });
+    }
+    return points;
   }
+
+  // Fallback: 2-point seed (cost at earliest buy date → current value today)
+  if (startYm === todayYm) return [];
   return [
     { label: ymLabel(startYm), date: startYm, v: totalCost },
     { label: ymLabel(todayYm), date: todayYm, v: totalValue },
@@ -228,6 +231,13 @@ export function generateFxSeries(
   if (currencyCards.length === 0) return { series: [], fxLabels: [] };
   const activeCurrencies = currencyCards.map((c) => c.code.toLowerCase());
 
+  // Fallback seed data (used for both 0-snapshot and 1-snapshot cases)
+  const fxHoldings = holdings.filter((h) => h.currency !== "SGD");
+  const earliest = fxHoldings.length > 0
+    ? fxHoldings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), fxHoldings[0].buyDate)
+    : new Date().toISOString().slice(0, 10);
+  const startYm = earliest.slice(0, 7);
+
   if (snapshots.length > 0) {
     const byMonth = snapshotsByMonth(snapshots);
     const fxLabels: string[] = [];
@@ -240,17 +250,21 @@ export function generateFxSeries(
       series.push(point);
       i++;
     }
+    // Only 1 snapshot month → prepend zero point so the chart always has ≥ 2 points
+    if (series.length < 2 && startYm < fxLabels[0]) {
+      const zeroPoint: FxSeriesPoint = { i: 0 };
+      for (const ccy of activeCurrencies) zeroPoint[ccy] = 0;
+      series.unshift(zeroPoint);
+      fxLabels.unshift(startYm);
+      for (let j = 0; j < series.length; j++) series[j].i = j;
+    }
     return { series, fxLabels };
   }
 
   // Fallback: 2-point seed — FX impact was 0 at earliest buy, is current value today
-  const fxHoldings = holdings.filter((h) => h.currency !== "SGD");
   if (fxHoldings.length === 0) return { series: [], fxLabels: [] };
 
-  const earliest = fxHoldings.reduce((min, h) => (h.buyDate < min ? h.buyDate : min), fxHoldings[0].buyDate);
-  const startYm = earliest.slice(0, 7);
   const todayYm = new Date().toISOString().slice(0, 7);
-
   const currentImpact: Record<string, number> = {};
   for (const c of currencyCards) currentImpact[c.code.toLowerCase()] = Math.round(c.impact);
 
@@ -261,8 +275,6 @@ export function generateFxSeries(
     nowPoint[ccy] = currentImpact[ccy] ?? 0;
   }
 
-  if (startYm === todayYm) {
-    return { series: [nowPoint], fxLabels: [todayYm] };
-  }
+  if (startYm === todayYm) return { series: [], fxLabels: [] };
   return { series: [zeroPoint, nowPoint], fxLabels: [startYm, todayYm] };
 }

@@ -12,6 +12,7 @@ export function Select({ value, options, onChange }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropRef    = useRef<HTMLDivElement>(null);
 
   const openDrop = useCallback(() => {
     const r = triggerRef.current?.getBoundingClientRect();
@@ -23,7 +24,8 @@ export function Select({ value, options, onChange }: SelectProps) {
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
-      if (!triggerRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!triggerRef.current?.contains(t) && !dropRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -45,13 +47,13 @@ export function Select({ value, options, onChange }: SelectProps) {
         />
       </button>
       {open && (
-        <div className="cselect-drop" style={dropStyle}>
+        <div ref={dropRef} className="cselect-drop" style={dropStyle}>
           {options.map((o) => (
             <button
               key={o}
               type="button"
               className={"cselect-opt" + (o === value ? " sel" : "")}
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onClick={() => { onChange(o); setOpen(false); }}
             >
               {o}

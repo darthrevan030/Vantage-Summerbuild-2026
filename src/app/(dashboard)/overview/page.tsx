@@ -74,8 +74,8 @@ export default function OverviewPage() {
         </div>
         <div className="stat-card">
           <span className="stat-label">Total Gain</span>
-          <span className="mono stat-value" style={{ color: "var(--gain)" }}>{fmtSigned(hero.totalGain)}</span>
-          <span className="mono stat-sub" style={{ color: "var(--gain)" }}>{pct(hero.totalGainPct)}</span>
+          <span className="mono stat-value" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(hero.totalGain)}</span>
+          <span className="mono stat-sub" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.totalGainPct)}</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">FX Impact</span>
@@ -120,7 +120,7 @@ export default function OverviewPage() {
           <div className="attr-rows">
             <div className="attr-item"><i style={{ background: "var(--gain)" }} /><div><div className="ui muted xs">Asset gain</div><div className="mono attr-v" style={{ color: "var(--gain)" }}>{fmtSigned(assetGain)}</div></div></div>
             <div className="attr-item"><i style={{ background: "var(--fx-positive)" }} /><div><div className="ui muted xs">FX gain</div><div className="mono attr-v" style={{ color: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>{fmtSigned(hero.fxImpact)}</div></div></div>
-            <div className="attr-item total"><div><div className="ui muted xs">Total gain</div><div className="mono attr-v">{fmtSigned(hero.totalGain)} <span style={{ color: "var(--gain)" }}>{pct(hero.totalGainPct)}</span></div></div></div>
+            <div className="attr-item total"><div><div className="ui muted xs">Total gain</div><div className="mono attr-v">{fmtSigned(hero.totalGain)} <span style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.totalGainPct)}</span></div></div></div>
           </div>
         </div>
       </div>

@@ -46,8 +46,12 @@ export function FXArea({ data, colors, keys, labels, height = 230, valFmt }: FXA
     y: padT + (g / Y_TICKS) * ih,
   }));
 
-  // X-axis date labels — show every ~6th point
-  const xTicks = data.filter((_, i) => i % Math.max(Math.floor(data.length / 6), 1) === 0 || i === data.length - 1);
+  const maxXTicks = Math.max(2, Math.floor(iw / 64));
+  const xStep = Math.ceil((data.length - 1) / (maxXTicks - 1));
+  const xTicks = data
+    .map((d, i) => ({ i }))
+    .filter(({ i }) => i % xStep === 0 || i === data.length - 1)
+    .filter(({ i }, k, arr) => k === 0 || i - arr[k - 1].i >= xStep * 0.5);
 
   return (
     <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
@@ -89,11 +93,13 @@ export function FXArea({ data, colors, keys, labels, height = 230, valFmt }: FXA
         })}
 
         {/* X-axis date ticks */}
-        {labels && xTicks.map((_, k) => {
-          const i = data.indexOf(xTicks[k]);
-          if (i < 0 || !labels[i]) return null;
+        {labels && xTicks.map(({ i }, k) => {
+          if (!labels[i]) return null;
+          const isFirst = k === 0;
+          const isLast  = k === xTicks.length - 1;
+          const anchor  = isFirst ? "start" : isLast ? "end" : "middle";
           return (
-            <text key={k} x={X(i)} y={height - 6} fill="var(--text-muted)" fontSize="10" textAnchor="middle" className="mono">
+            <text key={k} x={X(i)} y={height - 6} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="mono">
               {fmtYM(labels[i])}
             </text>
           );

@@ -209,21 +209,11 @@ function ManualForm() {
         </Field>
         {!PHYSICAL_TYPES.has(form.asset_type) && (
           <Field label="Exchange">
-            <div className="select" style={{ position: "relative" }}>
-              <select
-                value={form.exchange}
-                onChange={(e) => set("exchange", e.target.value)}
-                style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
-              >
-                {EXCHANGES.map((ex) => (
-                  <option key={ex.code} value={ex.code}>{ex.label}</option>
-                ))}
-              </select>
-              <span className="ui">
-                {EXCHANGES.find((ex) => ex.code === form.exchange)?.label ?? "— No exchange"}
-              </span>
-              <Icon name="chevron" size={14} />
-            </div>
+            <Select
+              value={EXCHANGES.find((ex) => ex.code === form.exchange)?.label ?? "— No exchange (physical / unlisted)"}
+              options={EXCHANGES.map((ex) => ex.label)}
+              onChange={(label) => set("exchange", EXCHANGES.find((ex) => ex.label === label)?.code ?? "")}
+            />
           </Field>
         )}
         <Field label="Asset Type">

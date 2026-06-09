@@ -8,6 +8,8 @@ import { AreaTrend } from "@/components/charts/AreaTrend";
 import { FXArea } from "@/components/charts/FXArea";
 import { pct } from "@/lib/formatters";
 import { useDateRange, RANGES } from "@/lib/useDateRange";
+import { useRouter } from "next/navigation";
+import { useToast } from "@/components/Toast";
 
 function RangeBar({
   activePreset,
@@ -45,6 +47,24 @@ function RangeBar({
 
 function PortfolioTrend() {
   const { portfolioSeries, fmtVal, fmtSigned } = usePortfolio();
+  const router = useRouter();
+  const { toast } = useToast();
+  const [backfilling, setBackfilling] = useState(false);
+
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const r = await fetch("/api/holdings/backfill", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "Backfill failed");
+      toast(`Loaded ${j.inserted} historical snapshot${j.inserted !== 1 ? "s" : ""}`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Backfill failed", "error");
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   const seriesLabels = useMemo(
     () => portfolioSeries.map((p) => p.date),
@@ -59,12 +79,14 @@ function PortfolioTrend() {
   } = useDateRange(seriesLabels);
 
   const data = useMemo(() => {
-    // Use nearest available index: find first label >= startDate and last label <= endDate
     const si = seriesLabels.findIndex((l) => l >= startDate);
     const ei = [...seriesLabels].reverse().findIndex((l) => l <= endDate);
     const eiActual = ei < 0 ? -1 : seriesLabels.length - 1 - ei;
     if (si < 0 || eiActual < 0 || si > eiActual) return portfolioSeries;
-    return portfolioSeries.slice(si, eiActual + 1);
+    const slice = portfolioSeries.slice(si, eiActual + 1);
+    // Not enough points in range — show full series so the chart is never blank
+    if (slice.length < 2) return portfolioSeries;
+    return slice;
   }, [portfolioSeries, seriesLabels, startDate, endDate]);
 
   const first = data[0];
@@ -85,6 +107,11 @@ function PortfolioTrend() {
     <div className="card chart-card reveal" style={{ animationDelay: ".04s" }}>
       <div className="card-head">
         <span className="card-title">Portfolio Value Over Time</span>
+        {portfolioSeries.length < 30 && (
+          <button className="icon-btn ghost sm" onClick={handleBackfill} disabled={backfilling}>
+            {backfilling ? "Loading…" : "Load history"}
+          </button>
+        )}
       </div>
       <RangeBar
         activePreset={activePreset}
@@ -167,7 +194,10 @@ function FXImpactCard() {
     const eiRev = [...fxLabels].reverse().findIndex((l) => l <= endDate);
     const ei = eiRev < 0 ? -1 : fxLabels.length - 1 - eiRev;
     if (si < 0 || ei < 0 || si > ei) return { filteredSeries: fxSeries, filteredLabels: fxLabels };
-    return { filteredSeries: fxSeries.slice(si, ei + 1), filteredLabels: fxLabels.slice(si, ei + 1) };
+    const slicedSeries = fxSeries.slice(si, ei + 1);
+    const slicedLabels = fxLabels.slice(si, ei + 1);
+    if (slicedSeries.length < 2) return { filteredSeries: fxSeries, filteredLabels: fxLabels };
+    return { filteredSeries: slicedSeries, filteredLabels: slicedLabels };
   }, [fxSeries, fxLabels, startDate, endDate]);
 
   return (
