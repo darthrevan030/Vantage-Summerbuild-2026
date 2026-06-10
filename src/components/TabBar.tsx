@@ -21,9 +21,10 @@ const TABS = [
 interface TabBarProps {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  onTweaksToggle?: () => void;
 }
 
-export function TabBar({ mobileOpen = false, onMobileClose }: TabBarProps) {
+export function TabBar({ mobileOpen = false, onMobileClose, onTweaksToggle }: TabBarProps) {
   const pathname = usePathname();
   const router   = useRouter();
   const { displayName } = usePortfolio();
@@ -115,6 +116,18 @@ export function TabBar({ mobileOpen = false, onMobileClose }: TabBarProps) {
                 <Icon name="refresh" size={15} />
                 Refresh prices
               </button>
+              {onTweaksToggle && (
+                <button
+                  className="mm-action"
+                  onClick={() => {
+                    onMobileClose?.();
+                    onTweaksToggle();
+                  }}
+                >
+                  <Icon name="sliders" size={15} />
+                  Appearance
+                </button>
+              )}
               <button className="mm-action mm-action-logout" onClick={handleLogout}>
                 <Icon name="logout" size={15} />
                 Log out

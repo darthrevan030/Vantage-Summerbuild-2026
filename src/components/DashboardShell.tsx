@@ -65,7 +65,11 @@ export function DashboardShell({
           onTweaksToggle={() => setTweaksOpen((o) => !o)}
           onHamburger={() => setMobileNavOpen(true)}
         />
-        <TabBar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        <TabBar
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
+          onTweaksToggle={() => setTweaksOpen((o) => !o)}
+        />
         <div className="body">
           {showSidebar && <SummaryRail />}
           <main className={"content" + (showSidebar ? "" : " nosb")} key={pathname}>
