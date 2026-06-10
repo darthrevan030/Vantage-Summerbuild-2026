@@ -5,12 +5,11 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
 import { fetchFx } from "@/lib/api-client";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE"];
-const STRATEGIES  = ["long_term", "active", "speculative", "physical"];
 
 const PHYSICAL_TYPES = new Set(["Gold", "RE"]);
 
@@ -29,8 +28,8 @@ const TYPE_ICON: Record<string, string> = {
 // ---- reusable field primitive ----
 function Field({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
   return (
-    <label className={"field" + (full ? " full" : "")}>
-      <span className="ui field-label">{label}</span>
+    <label className={"flex flex-col gap-1.5" + (full ? " col-span-full" : "")}>
+      <span className="font-ui text-[12px] text-secondary">{label}</span>
       {children}
     </label>
   );
@@ -85,13 +84,16 @@ function ManualForm() {
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Auto-fetch historical FX rate when date or currency changes
+  // Auto-fetch historical FX rate when date or currency changes.
+  // All state updates run inside the scheduled callback (SGD with 0 delay,
+  // others debounced) so none fire synchronously during the effect.
   useEffect(() => {
     if (fxDebounce.current) clearTimeout(fxDebounce.current);
-    if (form.currency === "SGD") { set("buy_fx_rate", "1"); setFxAuto(true); return; }
-    if (form.buy_date.length < 10) return;
+    const isSgd = form.currency === "SGD";
+    if (!isSgd && form.buy_date.length < 10) return;
 
     fxDebounce.current = setTimeout(async () => {
+      if (isSgd) { set("buy_fx_rate", "1"); setFxAuto(true); return; }
       setFetchingFx(true);
       try {
         const today = new Date().toISOString().slice(0, 10);
@@ -101,7 +103,7 @@ function ManualForm() {
         if (rate) { set("buy_fx_rate", (1 / rate).toFixed(4)); setFxAuto(true); }
       } catch { /* silent — user can still type manually */ }
       finally { setFetchingFx(false); }
-    }, 400);
+    }, isSgd ? 0 : 400);
 
     return () => { if (fxDebounce.current) clearTimeout(fxDebounce.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,12 +180,12 @@ function ManualForm() {
   };
 
   return (
-    <div className="card reveal">
-      <div className="card-head">
-        <span className="card-title">Manual Entry</span>
-        <span className="ui muted">add a position</span>
+    <div className="card animate-reveal px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3">
+      <div className="flex items-baseline justify-between mb-4 max-bp600:flex-wrap max-bp600:gap-2 max-bp600:items-center">
+        <span className="text-[13px] font-semibold text-primary tracking-[.01em]">Manual Entry</span>
+        <span className="font-ui text-secondary text-[11px]">add a position</span>
       </div>
-      <div className="form">
+      <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
         <Field label="Asset Name" full>
           <input className="inp" placeholder="e.g. Microsoft Corp." value={form.name} onChange={(e) => set("name", e.target.value)} />
         </Field>
@@ -227,7 +229,7 @@ function ManualForm() {
           <input className="inp" type="date" value={form.buy_date} max={TODAY} onChange={(e) => set("buy_date", e.target.value)} />
         </Field>
         <Field label="Purchase FX Rate" full>
-          <div className="fx-fetch">
+          <div className="flex gap-2.5 items-stretch">
             <div style={{ position: "relative", flex: 1 }}>
               <input
                 className="inp"
@@ -245,9 +247,9 @@ function ManualForm() {
                 }}>AUTO</span>
               )}
             </div>
-            <button className="icon-btn ghost sm" onClick={handleFetchFx} disabled={fetchingFx}>
+            <button className="flex items-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle bg-surface px-2.5 py-1.5 font-ui text-[11.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={handleFetchFx} disabled={fetchingFx}>
               <Icon name="refresh" size={14} />
-              <span className="ui">{fetchingFx ? "Fetching…" : "Fetch rate"}</span>
+              <span className="font-ui">{fetchingFx ? "Fetching…" : "Fetch rate"}</span>
             </button>
           </div>
         </Field>
@@ -255,9 +257,9 @@ function ManualForm() {
           <input className="inp" placeholder="optional" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
         </Field>
 
-        {error && <div className="ui" style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}>{error}</div>}
+        {error && <div className="font-ui" style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}>{error}</div>}
 
-        <button className="btn-gold" onClick={handleSubmit} disabled={saving || !form.name.trim() || !form.buy_price}>
+        <button className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default" onClick={handleSubmit} disabled={saving || !form.name.trim() || !form.buy_price}>
           <Icon name="plus" size={16} />
           {saving ? "Saving…" : "Add Holding"}
         </button>
@@ -341,16 +343,21 @@ function ImportPanel() {
   const FIELD_OPTIONS = ["(ignore)", "name", "ticker", "asset_type", "strategy", "broker", "units", "currency", "buy_price", "buy_date", "buy_fx_rate"];
 
   return (
-    <div className="card reveal" style={{ animationDelay: ".06s" }}>
-      <div className="card-head">
-        <span className="card-title">Import &amp; Backup</span>
-        <span className="ui muted">CSV · XLSX · JSON</span>
+    <div className="card animate-reveal px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3" style={{ animationDelay: ".06s" }}>
+      <div className="flex items-baseline justify-between mb-4 max-bp600:flex-wrap max-bp600:gap-2 max-bp600:items-center">
+        <span className="text-[13px] font-semibold text-primary tracking-[.01em]">Import &amp; Backup</span>
+        <span className="font-ui text-secondary text-[11px]">CSV · XLSX · JSON</span>
       </div>
 
       <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
 
       <div
-        className={"dropzone" + (drag ? " over" : "")}
+        className={
+          "flex flex-col items-center gap-[7px] text-center border-[1.5px] border-dashed rounded-[13px] cursor-pointer px-5 py-[30px] [transition:background_.2s,border-color_.2s] " +
+          (drag
+            ? "bg-elevated border-gold"
+            : "bg-surface border-gold-soft hover:bg-elevated hover:border-gold")
+        }
         onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
         onDrop={handleDrop}
@@ -358,21 +365,21 @@ function ImportPanel() {
         style={{ cursor: "pointer" }}
       >
         <Icon name="upload" size={26} style={{ color: "var(--gold)" }} />
-        <div className="dz-title ui">Drop CSV here</div>
-        <div className="ui muted">or click to browse</div>
-        <div className="ui muted xs dz-sup">Supported: Tiger · Saxo · DBS Vickers · IBKR · Moomoo</div>
+        <div className="font-ui text-[14px] font-semibold mt-1">Drop CSV here</div>
+        <div className="font-ui text-secondary">or click to browse</div>
+        <div className="font-ui text-secondary text-[11px] tracking-[.04em] mt-2">Supported: Tiger · Saxo · DBS Vickers · IBKR · Moomoo</div>
       </div>
 
       {headers.length > 0 && (
-        <div className="mapping">
-          <div className="map-head ui muted">
+        <div className="mt-[18px] flex flex-col gap-[9px]">
+          <div className="flex justify-between text-[10.5px] uppercase tracking-[.08em] pb-1 font-ui text-secondary">
             <span>Your Column</span><span>Maps To</span>
           </div>
           {headers.map((h) => (
-            <div className="map-row" key={h}>
-              <span className="mono map-from">&quot;{h}&quot;</span>
-              <Icon name="arrow" size={13} className="map-arrow" />
-              <div className="select" style={{ position: "relative" }}>
+            <div className="grid grid-cols-[1fr_18px_1fr] items-center gap-2.5" key={h}>
+              <span className="font-mono text-[12.5px] text-secondary">&quot;{h}&quot;</span>
+              <Icon name="arrow" size={13} className="text-muted" />
+              <div className="relative">
                 <select
                   value={mapping[h] ?? "(ignore)"}
                   onChange={(e) => setMapping((m) => ({ ...m, [h]: e.target.value }))}
@@ -380,25 +387,25 @@ function ImportPanel() {
                 >
                   {FIELD_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
-                <span className="ui">{mapping[h] ?? "(ignore)"}</span>
+                <span className="font-ui">{mapping[h] ?? "(ignore)"}</span>
                 <Icon name="chevron" size={14} />
               </div>
             </div>
           ))}
-          <div className="map-ok ui">
+          <div className="flex items-center gap-[7px] text-[12px] text-secondary mt-1 font-ui">
             <Icon name="check" size={13} style={{ color: "var(--gain)" }} />
             {Object.values(mapping).filter((v) => v !== "(ignore)").length} of {headers.length} columns mapped
           </div>
-          {result && <div className="ui" style={{ color: result.includes("failed") ? "var(--loss)" : "var(--gain)", marginTop: 8 }}>{result}</div>}
-          <button className="btn-gold" style={{ marginTop: 8 }} onClick={handleImport} disabled={importing || rows.length === 0}>
+          {result && <div className="font-ui" style={{ color: result.includes("failed") ? "var(--loss)" : "var(--gain)", marginTop: 8 }}>{result}</div>}
+          <button className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default" style={{ marginTop: 8 }} onClick={handleImport} disabled={importing || rows.length === 0}>
             <Icon name="upload" size={15} />
             {importing ? "Importing…" : `Import ${rows.length} rows`}
           </button>
         </div>
       )}
 
-      <div className="backup">
-        <button className="icon-btn outline" onClick={() => {
+      <div className="flex gap-3 mt-5">
+        <button className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]" onClick={() => {
           fetch("/api/holdings").then((r) => r.json()).then((data) => {
             const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
             const a = document.createElement("a"); a.href = url; a.download = "portfolio-backup.json"; a.click();
@@ -408,15 +415,15 @@ function ImportPanel() {
           <Icon name="download" size={15} />Export JSON
         </button>
       </div>
-      <div className="ui muted xs privacy">Your data is stored in Supabase — export anytime to keep a local copy.</div>
+      <div className="font-ui text-secondary text-[11px] tracking-[.04em] text-center mt-3">Your data is stored in Supabase — export anytime to keep a local copy.</div>
     </div>
   );
 }
 
 export default function AddPage() {
   return (
-    <div className="tab-body">
-      <div className="add-grid">
+    <div className="flex flex-col gap-4.5 min-w-0 w-full">
+      <div className="grid grid-cols-2 gap-4.5 items-start max-bp1080:grid-cols-1">
         <ManualForm />
         <ImportPanel />
       </div>

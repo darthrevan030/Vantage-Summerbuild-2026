@@ -16,8 +16,11 @@ export function RoleToggle({ userId, initialRole }: { userId: string; initialRol
 
   return (
     <button
-      className={"sent-pill " + (role === "admin" ? "bull" : "neut")}
-      style={{ cursor: busy ? "wait" : "pointer", border: "none", background: "transparent" }}
+      className={
+        "whitespace-nowrap rounded-full border-none bg-transparent px-[11px] py-1 font-ui text-[11px] font-semibold tracking-[.02em] " +
+        (busy ? "cursor-wait " : "cursor-pointer ") +
+        (role === "admin" ? "text-gain" : "text-gold")
+      }
       onClick={() => commit(role === "admin" ? "user" : "admin")}
       disabled={busy}
       title={role === "admin" ? "Click to demote to user" : "Click to promote to admin"}

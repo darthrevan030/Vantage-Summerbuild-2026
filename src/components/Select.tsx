@@ -32,27 +32,40 @@ export function Select({ value, options, onChange }: SelectProps) {
   }, [open]);
 
   return (
-    <div className="cselect">
+    <div className="relative w-full">
       <button
         ref={triggerRef}
         type="button"
-        className={"cselect-trigger" + (open ? " open" : "")}
+        className={
+          "flex w-full cursor-pointer items-center justify-between gap-2 rounded-[9px] border bg-elevated px-3 py-2.5 text-left font-ui text-[13px] text-primary transition-[border-color,box-shadow] duration-150 " +
+          (open
+            ? "border-gold-soft shadow-[0_0_0_3px_var(--accent-tint)]"
+            : "border-subtle hover:border-muted")
+        }
         onClick={() => (open ? setOpen(false) : openDrop())}
       >
-        <span className="cselect-val">{value}</span>
+        <span className="truncate font-flag text-[13px]">{value}</span>
         <Icon
           name="chevron"
           size={14}
-          style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform .15s", flexShrink: 0 }}
+          className="shrink-0 text-muted"
+          style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform .15s" }}
         />
       </button>
       {open && (
-        <div ref={dropRef} className="cselect-drop" style={dropStyle}>
+        <div
+          ref={dropRef}
+          className="fixed z-[9999] overflow-hidden rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
+          style={dropStyle}
+        >
           {options.map((o) => (
             <button
               key={o}
               type="button"
-              className={"cselect-opt" + (o === value ? " sel" : "")}
+              className={
+                "block w-full cursor-pointer whitespace-nowrap rounded-[7px] px-[11px] py-2 text-left font-flag text-[13px] transition-[background,color] duration-100 hover:bg-elevated hover:text-primary " +
+                (o === value ? "text-gold" : "text-secondary")
+              }
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onClick={() => { onChange(o); setOpen(false); }}
             >

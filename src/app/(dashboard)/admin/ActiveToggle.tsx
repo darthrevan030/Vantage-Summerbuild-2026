@@ -31,28 +31,12 @@ export function ActiveToggle({
   );
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "10px 0",
-        borderBottom: "1px solid var(--border-subtle)",
-      }}
-    >
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <span className="mono" style={{ fontSize: 12, minWidth: codeMinWidth }}>{code}</span>
-        <span className="ui muted" style={{ fontSize: 12 }}>{label}</span>
+    <div className="flex items-center justify-between border-b border-subtle py-2.5">
+      <div className="flex items-center gap-2.5">
+        <span className="font-mono text-xs tabular-nums" style={{ minWidth: codeMinWidth }}>{code}</span>
+        <span className="font-ui text-xs text-secondary">{label}</span>
         {region && (
-          <span
-            className="ui muted xs"
-            style={{
-              fontSize: 10,
-              padding: "2px 6px",
-              borderRadius: 4,
-              background: "var(--bg-subtle, rgba(255,255,255,.06))",
-            }}
-          >
+          <span className="rounded bg-[var(--bg-subtle,rgba(255,255,255,.06))] px-1.5 py-0.5 font-ui text-[10px] tracking-[.04em] text-secondary">
             {region}
           </span>
         )}
@@ -60,17 +44,11 @@ export function ActiveToggle({
       <button
         onClick={() => commit(!active)}
         disabled={busy}
-        style={{
-          cursor: busy ? "wait" : "pointer",
-          border: "1px solid var(--border-subtle)",
-          borderRadius: 6,
-          padding: "4px 12px",
-          fontSize: 11,
-          fontFamily: "inherit",
-          background: active ? "var(--gain-dim, rgba(74,222,128,.12))" : "transparent",
-          color: active ? "var(--gain)" : "var(--text-muted)",
-          transition: "all .15s",
-        }}
+        className={
+          "rounded-md border border-subtle px-3 py-1 font-[inherit] text-[11px] transition-all duration-150 " +
+          (busy ? "cursor-wait " : "cursor-pointer ") +
+          (active ? "bg-[var(--gain-dim,rgba(74,222,128,.12))] text-gain" : "bg-transparent text-muted")
+        }
       >
         {busy ? "…" : active ? "Active" : "Inactive"}
       </button>

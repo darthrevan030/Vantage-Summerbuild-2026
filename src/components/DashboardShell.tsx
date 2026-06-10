@@ -7,7 +7,6 @@ import { TabBar } from "@/components/TabBar";
 import { SummaryRail } from "@/components/SummaryRail";
 import { TweaksPanel } from "@/components/TweaksPanel";
 import { PortfolioProvider } from "@/context/portfolio";
-import { ToastContainer } from "react-toastify";
 import type { HoldingRow } from "@/types/holding";
 import type {
   HeroStats,
@@ -58,22 +57,33 @@ export function DashboardShell({
       portfolioSeries, portfolioSeriesDaily, fxSeries, fxLabels, fxColors, baseFxRates,
       initialDisplayName, initialBaseCurrency, initialRole,
     }}>
-      <div className="app">
+      <div className="flex min-h-screen flex-col">
         <NerveBar
           hero={hero}
           animate
           onTweaksToggle={() => setTweaksOpen((o) => !o)}
           onHamburger={() => setMobileNavOpen(true)}
         />
-        <TabBar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
-        <div className="body">
+        <TabBar
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
+          onTweaksToggle={() => setTweaksOpen((o) => !o)}
+        />
+        <div className="flex min-w-0 flex-1 items-start">
           {showSidebar && <SummaryRail />}
-          <main className={"content" + (showSidebar ? "" : " nosb")} key={pathname}>
+          <main
+            className={
+              "min-w-0 flex-1 px-[30px] pb-20 pt-[26px] " +
+              "max-bp900:px-[22px] max-bp900:pb-[60px] max-bp900:pt-5 " +
+              "max-bp768:px-4 max-bp768:pt-4 max-bp600:px-3 max-bp600:pt-3 max-bp380:px-2 max-bp380:pt-2 " +
+              (showSidebar ? "" : "[&>*]:mx-auto [&>*]:max-w-[1600px]")
+            }
+            key={pathname}
+          >
             {children}
           </main>
         </div>
         <TweaksPanel open={tweaksOpen} onClose={() => setTweaksOpen(false)} />
-        <ToastContainer position="bottom-right" autoClose={3500} theme="dark" newestOnTop />
       </div>
     </PortfolioProvider>
   );

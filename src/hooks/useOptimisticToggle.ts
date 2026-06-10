@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 
 /**
  * Optimistic remote value: applies `next` locally, sends the PATCH, and rolls

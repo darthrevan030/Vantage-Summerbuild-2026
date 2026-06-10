@@ -73,7 +73,7 @@ export function FXArea({ data, colors, keys, labels, height = 230, valFmt }: FXA
           <g key={g}>
             <line x1={padL} x2={w - padR} y1={t.y} y2={t.y} stroke="rgba(255,255,255,0.045)" strokeWidth="1" />
             {valFmt && (
-              <text x={padL - 6} y={t.y + 4} fill="var(--text-muted)" fontSize="10" textAnchor="end" className="mono">
+              <text x={padL - 6} y={t.y + 4} fill="var(--text-muted)" fontSize="10" textAnchor="end" className="font-mono">
                 {valFmt(t.v)}
               </text>
             )}
@@ -102,7 +102,7 @@ export function FXArea({ data, colors, keys, labels, height = 230, valFmt }: FXA
           const isLast  = k === xTicks.length - 1;
           const anchor  = isFirst ? "start" : isLast ? "end" : "middle";
           return (
-            <text key={k} x={X(i)} y={height - 6} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="mono">
+            <text key={k} x={X(i)} y={height - 6} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="font-mono">
               {fmtTick(labels[i])}
             </text>
           );

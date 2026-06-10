@@ -85,7 +85,7 @@ export default function LoginPage() {
           border: "1px solid var(--border-subtle)",
           borderRadius: "var(--r-card)",
           padding: "32px",
-          boxShadow: "var(--shadow-card)",
+          boxShadow: "var(--card-shadow)",
         }}>
           {phase === "sent" ? (
             /* ── Success state ── */

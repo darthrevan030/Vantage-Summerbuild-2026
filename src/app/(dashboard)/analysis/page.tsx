@@ -7,12 +7,30 @@ import { streamAnalysis } from "@/lib/api-client";
 import { pct } from "@/lib/formatters";
 import type { HoldingRow } from "@/types/holding";
 
+// shared gold button — matches the converted settings page pattern
+const BTN_GOLD =
+  "flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] mt-1 font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default";
+
 // ---- score helpers ----
 const labelFor = (s: number) => (s >= 25 ? "Bullish" : s <= -25 ? "Bearish" : "Neutral");
 const clsFor   = (s: number) => (s >= 25 ? "bull"   : s <= -25 ? "bear"    : "neut");
 const toneFor  = (s: number) => (s >= 25 ? "var(--gain)" : s <= -25 ? "var(--loss)" : "var(--gold)");
 const clamp    = (n: number) => Math.max(-100, Math.min(100, Math.round(Number(n) || 0)));
 const mean     = (a: number[]) => a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length) : 0;
+
+// sentiment pill variants — full utility strings swapped as a unit
+const PILL_CLS: Record<string, string> = {
+  bull: "bg-[rgba(70,216,160,.14)] text-gain",
+  bear: "bg-[rgba(255,111,139,.14)] text-loss",
+  neut: "bg-wash text-gold",
+};
+
+// headline sentiment dot variants — full utility strings swapped as a unit
+const HL_DOT_CLS: Record<string, string> = {
+  pos: "bg-gain shadow-[0_0_7px_rgba(70,216,160,.5)]",
+  neg: "bg-loss shadow-[0_0_7px_rgba(255,111,139,.5)]",
+  neu: "bg-muted",
+};
 
 // ---- curated fallback data ----
 const FALLBACK_ITEMS: Record<string, { score: number; summary: string; drivers: string[] }> = {
@@ -100,12 +118,12 @@ function ScoreRail({ score }: { score: number }) {
   const w    = (Math.abs(score) / 100) * 50;
   const left = score >= 0 ? 50 : 50 - w;
   return (
-    <div className="score-wrap">
-      <div className="score-rail">
-        <div className="score-zero" />
-        <div className="score-fill" style={{ left: left + "%", width: w + "%", background: toneFor(score) }} />
+    <div className="flex items-center gap-3">
+      <div className="relative flex-1 h-2.5 rounded-md bg-elevated">
+        <div className="absolute left-1/2 top-[-3px] bottom-[-3px] w-px bg-muted opacity-[.45]" />
+        <div className="absolute top-0 bottom-0 rounded-md [transition:width_.6s_cubic-bezier(.2,.7,.2,1),left_.6s_cubic-bezier(.2,.7,.2,1)]" style={{ left: left + "%", width: w + "%", background: toneFor(score) }} />
       </div>
-      <span className="score-num" style={{ color: toneFor(score) }}>{score > 0 ? "+" : ""}{score}</span>
+      <span className="font-mono text-[13px] font-semibold min-w-[38px] text-right" style={{ color: toneFor(score) }}>{score > 0 ? "+" : ""}{score}</span>
     </div>
   );
 }
@@ -146,38 +164,38 @@ function SentDrawer({ id, name, score, sparkData }: { id: string; name: string; 
   }, [id]);
 
   return (
-    <div className="sent-drawer">
-      <div className="sd-trend">
-        <div className="sd-trend-head">
-          <span className="ui muted xs">{useRealPrices ? "30-day price" : "30-day sentiment"}</span>
-          <span className="mono xs" style={{ color: delta >= 0 ? "var(--gain)" : "var(--loss)" }}>
+    <div className="flex flex-col gap-[13px] pt-[3px] [animation:fadeSlideUp_.3s_ease_both]">
+      <div className="flex flex-col gap-[5px] bg-elevated border border-subtle rounded-[11px] px-[13px] py-[11px]">
+        <div className="flex items-center justify-between">
+          <span className="font-ui text-secondary text-[11px] tracking-[.04em]">{useRealPrices ? "30-day price" : "30-day sentiment"}</span>
+          <span className="font-mono text-[11px] tracking-[.04em]" style={{ color: delta >= 0 ? "var(--gain)" : "var(--loss)" }}>
             {delta >= 0 ? "▲" : "▼"} {Math.abs(Math.round(delta))}{useRealPrices ? "%" : " pts"}
           </span>
         </div>
         <MiniSpark pts={pts} color={toneFor(score)} />
       </div>
-      <div className="sd-news">
+      <div className="flex flex-col">
         {hl === "loading" && [0, 1, 2].map((i) => (
-          <div className="hl-row" key={i}>
-            <div className="sk" style={{ width: 7, height: 7, borderRadius: "50%", marginTop: 5 }} />
-            <div className="hl-body" style={{ flex: 1, gap: 6 }}>
-              <div className="sk" style={{ height: 11, width: "88%" }} />
-              <div className="sk" style={{ height: 9, width: 70 }} />
+          <div className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5" key={i}>
+            <div className="bg-elevated rounded-lg animate-skeleton" style={{ width: 7, height: 7, borderRadius: "50%", marginTop: 5 }} />
+            <div className="flex flex-col gap-0.5 min-w-0" style={{ flex: 1, gap: 6 }}>
+              <div className="bg-elevated rounded-lg animate-skeleton" style={{ height: 11, width: "88%" }} />
+              <div className="bg-elevated rounded-lg animate-skeleton" style={{ height: 9, width: 70 }} />
             </div>
           </div>
         ))}
         {hl === "no-key" && (
-          <div className="hl-empty">No <code>FINNHUB_API_KEY</code> — set it to load live headlines for {name}.</div>
+          <div className="text-xs text-muted py-2.5 font-ui">No <code className="font-mono text-[11px] text-secondary">FINNHUB_API_KEY</code> — set it to load live headlines for {name}.</div>
         )}
         {hl === "empty" && (
-          <div className="hl-empty">No recent headlines found for {name}.</div>
+          <div className="text-xs text-muted py-2.5 font-ui">No recent headlines found for {name}.</div>
         )}
         {Array.isArray(hl) && hl.map((h, i) => (
-          <div className="hl-row" key={i}>
-            <i className={"hl-dot " + h.sent} />
-            <div className="hl-body">
-              <div className="hl-t">{h.t}</div>
-              <div className="hl-meta">{h.src} · {h.ago}</div>
+          <div className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5" key={i}>
+            <i className={"w-[7px] h-[7px] rounded-full mt-[5px] flex-[0_0_auto] " + (HL_DOT_CLS[h.sent] ?? "")} />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">{h.t}</div>
+              <div className="text-[11px] text-muted font-mono tracking-[.02em]">{h.src} · {h.ago}</div>
             </div>
           </div>
         ))}
@@ -192,25 +210,25 @@ interface SentItem { id: string; name: string; icon: string; assetType: string; 
 function SentCard({ it, delay }: { it: SentItem; delay: number }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={"card sent-card reveal" + (open ? " open" : "")} style={{ animationDelay: delay + "s" }}>
-      <div className="sent-top">
-        <div className="row-ic"><Icon name={it.icon as never} size={15} /></div>
-        <div className="sent-id">
-          <span className="ui">{it.name}</span>
-          <span className="mono ticker">{it.ticker.replace(/_\d+$/, "")}</span>
+    <div className="card flex flex-col gap-[13px] px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3 animate-reveal" style={{ animationDelay: delay + "s" }}>
+      <div className="flex items-center gap-[11px]">
+        <div className="w-7 h-7 rounded-[7px] bg-elevated border border-subtle grid place-items-center text-gold flex-[0_0_auto]"><Icon name={it.icon as never} size={15} /></div>
+        <div className="flex flex-col gap-px min-w-0 flex-1">
+          <span className="font-ui text-[14px] font-semibold text-primary whitespace-nowrap overflow-hidden text-ellipsis">{it.name}</span>
+          <span className="font-mono text-[10.5px] text-muted tracking-[.05em]">{it.ticker.replace(/_\d+$/, "")}</span>
         </div>
-        <span className={"sent-pill " + clsFor(it.score)}>{labelFor(it.score)}</span>
+        <span className={"font-ui text-[11px] font-semibold px-[11px] py-1 rounded-full whitespace-nowrap tracking-[.02em] " + (PILL_CLS[clsFor(it.score)] ?? "")}>{labelFor(it.score)}</span>
       </div>
       <ScoreRail score={it.score} />
-      <div className="sent-sum">{it.summary}</div>
+      <div className="text-[12.8px] leading-[1.55] text-secondary">{it.summary}</div>
       {it.drivers.length > 0 && (
-        <div className="drivers">
-          {it.drivers.map((d, i) => <span className="driver" key={i}>{d}</span>)}
+        <div className="flex flex-wrap gap-1.5">
+          {it.drivers.map((d, i) => <span className="font-ui text-[11px] text-secondary bg-elevated border border-subtle rounded-[7px] px-[9px] py-1" key={i}>{d}</span>)}
         </div>
       )}
-      <button className="sent-more" onClick={() => setOpen((o) => !o)}>
+      <button className="mt-px flex items-center justify-center gap-1.5 w-full bg-transparent border-t border-subtle pt-[11px] pb-px px-0 text-secondary font-ui text-xs cursor-pointer transition-colors duration-150 hover:text-gold" onClick={() => setOpen((o) => !o)}>
         {open ? "Hide detail" : "Headlines & 30-day trend"}
-        <Icon name="chevron" size={14} />
+        <Icon name="chevron" size={14} className={open ? "rotate-180 transition-transform duration-[250ms]" : "transition-transform duration-[250ms]"} />
       </button>
       {open && <SentDrawer id={it.id} name={it.name} assetType={it.assetType} score={it.score} sparkData={it.sparkData} />}
     </div>
@@ -219,19 +237,19 @@ function SentCard({ it, delay }: { it: SentItem; delay: number }) {
 
 function SkelCard({ delay }: { delay: number }) {
   return (
-    <div className="card sent-card reveal" style={{ animationDelay: delay + "s" }}>
-      <div className="sent-top">
-        <div className="sk" style={{ width: 28, height: 28, borderRadius: 7 }} />
-        <div className="sent-id" style={{ gap: 6 }}>
-          <div className="sk" style={{ width: 130, height: 12 }} />
-          <div className="sk" style={{ width: 50, height: 9 }} />
+    <div className="card flex flex-col gap-[13px] px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3 animate-reveal" style={{ animationDelay: delay + "s" }}>
+      <div className="flex items-center gap-[11px]">
+        <div className="bg-elevated rounded-lg animate-skeleton" style={{ width: 28, height: 28, borderRadius: 7 }} />
+        <div className="flex flex-col gap-px min-w-0 flex-1" style={{ gap: 6 }}>
+          <div className="bg-elevated rounded-lg animate-skeleton" style={{ width: 130, height: 12 }} />
+          <div className="bg-elevated rounded-lg animate-skeleton" style={{ width: 50, height: 9 }} />
         </div>
-        <div className="sk" style={{ width: 66, height: 22, borderRadius: 999 }} />
+        <div className="bg-elevated rounded-lg animate-skeleton" style={{ width: 66, height: 22, borderRadius: 999 }} />
       </div>
-      <div className="sk" style={{ height: 10, borderRadius: 6 }} />
-      <div className="sk" style={{ height: 34 }} />
-      <div className="drivers">
-        {[44, 60, 50].map((w, i) => <div className="sk" key={i} style={{ width: w, height: 22, borderRadius: 7 }} />)}
+      <div className="bg-elevated rounded-lg animate-skeleton" style={{ height: 10, borderRadius: 6 }} />
+      <div className="bg-elevated rounded-lg animate-skeleton" style={{ height: 34 }} />
+      <div className="flex flex-wrap gap-1.5">
+        {[44, 60, 50].map((w, i) => <div className="bg-elevated rounded-lg animate-skeleton" key={i} style={{ width: w, height: 22, borderRadius: 7 }} />)}
       </div>
     </div>
   );
@@ -243,22 +261,22 @@ function Hero({ overall, items }: { overall: { score: number; note: string }; it
   items.forEach((i) => { (counts[clsFor(i.score) as "bull" | "neut" | "bear"])++; });
   const mark = ((overall.score + 100) / 200) * 100;
   return (
-    <div className="card an-hero reveal">
-      <div className="anh-left">
-        <span className="ui muted xs">Portfolio sentiment</span>
-        <span className="anh-label" style={{ color: toneFor(overall.score) }}>{labelFor(overall.score)}</span>
-        <span className="anh-score" style={{ color: toneFor(overall.score) }}>
-          {overall.score > 0 ? "+" : ""}{overall.score} <span className="muted">/ 100</span>
+    <div className="card relative grid grid-cols-[minmax(180px,250px)_1fr] gap-[34px] items-center overflow-hidden px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3 max-bp1080:grid-cols-[1fr] max-bp1080:gap-[22px] before:content-[''] before:absolute before:inset-0 before:bg-[radial-gradient(70%_130%_at_14%_18%,var(--accent-glow)_0%,transparent_58%)] before:opacity-60 before:pointer-events-none animate-reveal">
+      <div className="relative flex flex-col gap-1">
+        <span className="font-ui text-secondary text-[11px] tracking-[.04em]">Portfolio sentiment</span>
+        <span className="font-serif font-normal text-[38px] leading-none tracking-[.3px] max-bp768:text-[32px]" style={{ color: toneFor(overall.score) }}>{labelFor(overall.score)}</span>
+        <span className="font-mono text-[14px] font-semibold" style={{ color: toneFor(overall.score) }}>
+          {overall.score > 0 ? "+" : ""}{overall.score} <span className="text-secondary">/ 100</span>
         </span>
-        <span className="anh-note">{overall.note}</span>
+        <span className="text-[12.5px] text-secondary mt-1.5 max-w-[240px]">{overall.note}</span>
       </div>
-      <div className="anh-right">
-        <div className="meter"><div className="meter-mark" style={{ left: `calc(${mark}% - 2px)` }} /></div>
-        <div className="meter-scale"><span>Bearish</span><span>Neutral</span><span>Bullish</span></div>
-        <div className="dist">
-          <span className="dist-item"><i className="dist-dot" style={{ background: "var(--gain)" }} /><b>{counts.bull}</b> Bullish</span>
-          <span className="dist-item"><i className="dist-dot" style={{ background: "var(--gold)" }} /><b>{counts.neut}</b> Neutral</span>
-          <span className="dist-item"><i className="dist-dot" style={{ background: "var(--loss)" }} /><b>{counts.bear}</b> Bearish</span>
+      <div className="relative flex flex-col gap-3.5">
+        <div className="relative h-3 rounded-lg bg-[linear-gradient(90deg,var(--loss)_0%,#6c6786_50%,var(--gain)_100%)] opacity-[.92]"><div className="absolute top-[-5px] w-1 h-[22px] rounded-[3px] bg-primary shadow-[0_0_12px_var(--accent-glow),0_2px_6px_rgba(0,0,0,.5)] [transition:left_.7s_cubic-bezier(.2,.7,.2,1)]" style={{ left: `calc(${mark}% - 2px)` }} /></div>
+        <div className="flex justify-between text-[10.5px] text-muted font-mono mt-[-4px]"><span>Bearish</span><span>Neutral</span><span>Bullish</span></div>
+        <div className="flex gap-[18px]">
+          <span className="flex items-center gap-[7px] text-[12.5px] text-secondary"><i className="w-[9px] h-[9px] rounded-[3px]" style={{ background: "var(--gain)" }} /><b className="text-primary font-semibold tabular-nums">{counts.bull}</b> Bullish</span>
+          <span className="flex items-center gap-[7px] text-[12.5px] text-secondary"><i className="w-[9px] h-[9px] rounded-[3px]" style={{ background: "var(--gold)" }} /><b className="text-primary font-semibold tabular-nums">{counts.neut}</b> Neutral</span>
+          <span className="flex items-center gap-[7px] text-[12.5px] text-secondary"><i className="w-[9px] h-[9px] rounded-[3px]" style={{ background: "var(--loss)" }} /><b className="text-primary font-semibold tabular-nums">{counts.bear}</b> Bearish</span>
         </div>
       </div>
     </div>
@@ -309,21 +327,21 @@ function AskBox({ holdings }: { holdings: HoldingRow[] }) {
   };
 
   return (
-    <div className="card ask">
-      <div className="card-head">
-        <span className="card-title">Ask the analyst</span>
-        <span className="ui muted">AI · plain language</span>
+    <div className="card flex flex-col gap-3 px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3">
+      <div className="flex items-baseline justify-between mb-4 max-bp600:flex-wrap max-bp600:gap-2 max-bp600:items-center">
+        <span className="text-[13px] font-semibold text-primary tracking-[.01em]">Ask the analyst</span>
+        <span className="font-ui text-secondary text-[11px]">AI · plain language</span>
       </div>
-      <div className="ask-row">
+      <div className="flex gap-2.5">
         <input
-          className="inp"
+          className="inp flex-1"
           placeholder="Ask anything about your portfolio…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") ask(); }}
         />
         <button
-          className="btn-gold"
+          className={BTN_GOLD}
           style={{ margin: 0, padding: "11px 20px", gridColumn: "auto" }}
           disabled={phase === "thinking"}
           onClick={() => ask()}
@@ -331,17 +349,17 @@ function AskBox({ holdings }: { holdings: HoldingRow[] }) {
           {phase === "thinking" ? "Thinking…" : "Ask"}
         </button>
       </div>
-      <div className="ask-chips">
+      <div className="flex gap-2 flex-wrap">
         {SUGGEST.map((s) => (
-          <button className="ask-chip" key={s} onClick={() => ask(s)}>{s}</button>
+          <button className="font-ui text-xs text-secondary bg-elevated border border-subtle rounded-lg px-3 py-[7px] cursor-pointer transition-all duration-150 hover:text-gold hover:border-gold-soft" key={s} onClick={() => ask(s)}>{s}</button>
         ))}
       </div>
       {phase === "thinking" && (
-        <div className="ask-answer muted">Reading your book<span className="cursor" /></div>
+        <div className="text-[13.5px] leading-[1.6] text-primary border-l-2 border-gold-soft pl-4 py-1 [animation:fadeSlideUp_.4s_ease_both]">Reading your book<span className="inline-block w-[7px] h-[15px] bg-gold ml-0.5 align-[-2px] animate-blink" /></div>
       )}
       {(phase === "typing" || phase === "done") && (
-        <div className="ask-answer">
-          {ans}{phase === "typing" && <span className="cursor" />}
+        <div className="text-[13.5px] leading-[1.6] text-primary border-l-2 border-gold-soft pl-4 py-1 [animation:fadeSlideUp_.4s_ease_both]">
+          {ans}{phase === "typing" && <span className="inline-block w-[7px] h-[15px] bg-gold ml-0.5 align-[-2px] animate-blink" />}
         </div>
       )}
     </div>
@@ -433,20 +451,20 @@ export default function AnalysisPage() {
   const right = data.items.filter((_, i) => i % 2 === 1);
 
   return (
-    <div className="tab-body">
-      <div className="an-head reveal">
+    <div className="flex flex-col gap-[18px] min-w-0 w-full">
+      <div className="flex items-end justify-between gap-[18px] flex-wrap mb-0.5 animate-reveal">
         <div>
-          <div className="an-eyebrow">AI Analysis</div>
-          <h2>Market sentiment</h2>
-          <div className="an-sub">A live read on every holding — direction, conviction, and the drivers moving each position.</div>
+          <div className="text-[10.5px] uppercase tracking-[.14em] text-gold font-semibold">AI Analysis</div>
+          <h2 className="font-serif font-normal text-[26px] mt-1.5 mb-1 tracking-[.2px]">Market sentiment</h2>
+          <div className="text-[13px] text-secondary max-w-[440px]">A live read on every holding — direction, conviction, and the drivers moving each position.</div>
         </div>
-        <div className="an-actions">
-          <span className="an-ai-chip">
-            <i className={aiRunning ? "pulse" : ""} />
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-[7px] text-[11px] text-secondary">
+            <i className="w-1.5 h-1.5 rounded-full bg-gold shadow-[0_0_8px_var(--accent-glow)]" />
             {aiRunning ? "Analysing…" : data.source === "ai" ? "Updated just now" : "Sample data"}
           </span>
           <button
-            className="btn-gold"
+            className={BTN_GOLD}
             style={{ margin: 0, padding: "11px 18px", gridColumn: "auto" }}
             disabled={aiRunning}
             onClick={run}
@@ -458,16 +476,16 @@ export default function AnalysisPage() {
 
       <Hero overall={data.overall} items={data.items} />
       <AskBox holdings={holdings} />
-      <div className="sent-grid">
-        <div className="sent-col">
+      <div className="flex gap-[18px] items-start max-bp1080:flex-col max-bp768:w-full">
+        <div className="flex-1 flex flex-col gap-[18px] min-w-0">
           {left.map((it, i) => <SentCard key={it.id} it={it} delay={0.05 + i * 0.08} />)}
         </div>
-        <div className="sent-col">
+        <div className="flex-1 flex flex-col gap-[18px] min-w-0">
           {right.map((it, i) => <SentCard key={it.id} it={it} delay={0.09 + i * 0.08} />)}
         </div>
       </div>
       {data.source === "sample" && !aiRunning && (
-        <div className="an-note">
+        <div className="text-[11.5px] text-muted flex items-center gap-1.5">
           <Icon name="file" size={13} />
           Showing curated sample data — set a real <code>ANTHROPIC_API_KEY</code> for a live read.
         </div>

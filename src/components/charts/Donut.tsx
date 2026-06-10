@@ -25,7 +25,7 @@ export function Donut({ data, size = 130, thickness = 20, gap = 2.5, highlight =
   return (
     <div style={{ position: "relative", width: `min(${size}px, 100%)`, aspectRatio: "1" }}>
       <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)", display: "block" }}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={thickness} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--donut-track)" strokeWidth={thickness} />
         {data.map((d, i) => {
           const frac = d.value / total;
           const len = Math.max(c * frac - gap, 0.001);

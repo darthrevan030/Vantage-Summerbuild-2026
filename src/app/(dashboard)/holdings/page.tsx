@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "react-toastify";
+import { toast } from "sonner";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
@@ -18,17 +18,38 @@ const STRAT_LABEL_EDIT: Record<string, string> = {
   long_term: "Long Term", active: "Active", speculative: "Speculative", physical: "Physical",
 };
 
+const STRAT_GRAY = "bg-[rgba(136,146,164,0.12)] text-secondary";
 const STRAT: Record<string, { label: string; cls: string }> = {
-  long_term:   { label: "long-term",    cls: "st-teal"   },
-  active:      { label: "active",       cls: "st-amber"  },
-  speculative: { label: "speculative",  cls: "st-purple" },
-  physical:    { label: "physical",     cls: "st-gray"   },
+  long_term:   { label: "long-term",    cls: "bg-[rgba(52,211,153,0.1)] text-gain"   },
+  active:      { label: "active",       cls: "bg-tint text-gold"  },
+  speculative: { label: "speculative",  cls: "bg-[rgba(229,138,208,0.12)] text-fx-down" },
+  physical:    { label: "physical",     cls: STRAT_GRAY   },
 };
+
+const STRAT_BASE = "whitespace-nowrap rounded-md px-[9px] py-[3px] font-ui text-[11px]";
 
 const TYPES = ["All", "Equity", "ETF", "REIT", "Gold", "RE"] as const;
 
 const SORT_KEYS = ["name", "valueSGD", "assetGain", "fxGain", "totalPct"] as const;
 type SortKey = typeof SORT_KEYS[number];
+
+// .hrow + state variants (whole-class swaps)
+const ROW_UNSEL = "cursor-pointer border-l-2 border-l-transparent transition-[background] duration-150 hover:bg-elevated";
+const ROW_SEL = "cursor-pointer border-l-2 border-l-gold bg-elevated transition-[background] duration-150 hover:bg-elevated";
+const ROW_GROUP_HD = "cursor-pointer border-l-2 border-l-[rgba(212,163,78,.18)] bg-[rgba(212,163,78,.03)] transition-[background] duration-150 hover:bg-[rgba(212,163,78,.07)]";
+const ROW_LOT_UNSEL = "cursor-pointer border-l-2 border-l-transparent bg-surface transition-[background] duration-150";
+const ROW_LOT_SEL = "cursor-pointer border-l-2 border-l-gold bg-surface transition-[background] duration-150";
+
+// .htable td (+ .r / .bold) variants
+const CELL = "border-b border-subtle px-4 py-3.5 text-[13px] light:border-b-black/[.06]";
+const CELL_R = CELL + " text-right font-mono";
+const CELL_R_BOLD = CELL_R + " font-semibold";
+const SEL_SHADOW = " shadow-[inset_2px_0_0_var(--gold)]";
+// .hrow.lot-row td (10px 16px / 12px) + first-child pl 44px
+const LOT_CELL = "border-b border-subtle px-4 py-2.5 text-xs light:border-b-black/[.06]";
+const LOT_CELL_FIRST = "border-b border-subtle py-2.5 pr-4 pl-11 text-xs light:border-b-black/[.06]";
+const LOT_CELL_R = LOT_CELL + " text-right font-mono";
+const LOT_CELL_R_BOLD = LOT_CELL_R + " font-semibold";
 
 function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   const { fmtVal, fmtSigned } = usePortfolio();
@@ -100,142 +121,142 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   }
 
   if (mode === "edit") return (
-    <div className="detail-card reveal">
-      <div className="dc-head">
-        <div className="dc-id">
+    <div className="flex flex-[0_0_300px] flex-col gap-[13px] rounded-[13px] border border-subtle bg-elevated p-4 light:border-black/10 max-bp768:flex-[0_0_280px] max-bp600:flex-[0_0_calc(100vw_-_56px)] animate-reveal">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2.5">
           <Icon name={h.icon as never} size={18} style={{ color: "var(--gold)" }} />
-          <div className="ui dc-name">{h.name}</div>
+          <div className="font-ui text-[13.5px] font-semibold overflow-hidden text-ellipsis whitespace-nowrap">{h.name}</div>
         </div>
-        <button className="dc-close" onClick={() => setMode("view")}><Icon name="x" size={15} /></button>
+        <button className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-loss" onClick={() => setMode("view")}><Icon name="x" size={15} /></button>
       </div>
-      <div className="dc-form">
-        <div className="dc-field full">
-          <span className="dc-field-label">Name</span>
-          <input className="dc-inp" value={ef.name} onChange={e => setEf("name", e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2 flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Name</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" value={ef.name} onChange={e => setEf("name", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Ticker</span>
-          <input className="dc-inp" value={ef.ticker} onChange={e => setEf("ticker", e.target.value.toUpperCase())} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Ticker</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" value={ef.ticker} onChange={e => setEf("ticker", e.target.value.toUpperCase())} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Asset Type</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Asset Type</span>
           <Select value={ef.asset_type} options={ASSET_TYPES_EDIT} onChange={v => setEf("asset_type", v)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Strategy</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Strategy</span>
           <Select
             value={STRAT_LABEL_EDIT[ef.strategy] ?? ef.strategy}
             options={Object.values(STRAT_LABEL_EDIT)}
             onChange={v => setEf("strategy", Object.entries(STRAT_LABEL_EDIT).find(([,l]) => l === v)?.[0] ?? ef.strategy)}
           />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Units</span>
-          <input className="dc-inp" type="number" value={ef.units} onChange={e => setEf("units", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Units</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" type="number" value={ef.units} onChange={e => setEf("units", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Buy Price</span>
-          <input className="dc-inp" type="number" value={ef.buy_price} onChange={e => setEf("buy_price", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Buy Price</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" type="number" value={ef.buy_price} onChange={e => setEf("buy_price", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Buy Date</span>
-          <input className="dc-inp" type="date" value={ef.buy_date} onChange={e => setEf("buy_date", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Buy Date</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:[filter:invert(0.65)_brightness(1.4)]" type="date" value={ef.buy_date} onChange={e => setEf("buy_date", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Buy FX Rate</span>
-          <input className="dc-inp" type="number" value={ef.buy_fx_rate} onChange={e => setEf("buy_fx_rate", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Buy FX Rate</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" type="number" value={ef.buy_fx_rate} onChange={e => setEf("buy_fx_rate", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Current Price</span>
-          <input className="dc-inp" type="number" value={ef.current_price} onChange={e => setEf("current_price", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Current Price</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" type="number" value={ef.current_price} onChange={e => setEf("current_price", e.target.value)} />
         </div>
-        <div className="dc-field">
-          <span className="dc-field-label">Current FX Rate</span>
-          <input className="dc-inp" type="number" value={ef.current_fx_rate} onChange={e => setEf("current_fx_rate", e.target.value)} />
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">Current FX Rate</span>
+          <input className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft" type="number" value={ef.current_fx_rate} onChange={e => setEf("current_fx_rate", e.target.value)} />
         </div>
       </div>
-      <button className="dc-save" onClick={handleSave} disabled={saving}>
+      <button className="w-full cursor-pointer rounded-[9px] border-none bg-gold p-[9px] font-ui text-[13px] font-semibold text-[#15130c] transition-[filter] duration-150 hover:brightness-[1.08] disabled:cursor-not-allowed disabled:opacity-50" onClick={handleSave} disabled={saving}>
         {saving ? "Saving…" : "Save Changes"}
       </button>
     </div>
   );
 
   return (
-    <div className="detail-card reveal">
-      <div className="dc-head">
-        <div className="dc-id">
+    <div className="flex flex-[0_0_300px] flex-col gap-[13px] rounded-[13px] border border-subtle bg-elevated p-4 light:border-black/10 max-bp768:flex-[0_0_280px] max-bp600:flex-[0_0_calc(100vw_-_56px)] animate-reveal">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2.5">
           <Icon name={h.icon as never} size={18} style={{ color: "var(--gold)" }} />
           <div>
-            <div className="ui dc-name">{h.name}</div>
-            <div className="mono ticker">{h.ticker !== "—" ? h.ticker : h.assetType.toUpperCase()}</div>
+            <div className="font-ui text-[13.5px] font-semibold overflow-hidden text-ellipsis whitespace-nowrap">{h.name}</div>
+            <div className="font-mono text-[10.5px] tracking-[.05em] text-muted">{h.ticker !== "—" ? h.ticker : h.assetType.toUpperCase()}</div>
           </div>
         </div>
-        <button className="dc-close" onClick={onClose}><Icon name="x" size={15} /></button>
+        <button className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-loss" onClick={onClose}><Icon name="x" size={15} /></button>
       </div>
 
-      <div className="dc-hero">
-        <div className="mono dc-total" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <div className="font-mono text-[22px] font-semibold tracking-[-.01em]" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>
           {fmtSigned(total)}
         </div>
-        <div className="mono dc-pct" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>
+        <div className="font-mono text-[13px] font-semibold" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>
           {pct(h.totalPct)}
         </div>
-        <span className="ccy-chip">
-          <span className="flag">{h.flag}</span>
-          <span className="mono">{h.currency}</span>
+        <span className="ml-auto flex items-center gap-[5px] rounded-[7px] border border-subtle bg-surface px-2 py-[3px] text-[11px]">
+          <span className="font-flag">{h.flag}</span>
+          <span className="font-mono">{h.currency}</span>
         </span>
       </div>
 
-      <div className="dc-spark">
+      <div className="py-0.5 max-bp600:[&_svg]:w-full">
         <Spark pts={h.sparkData} color={total >= 0 ? "var(--gain)" : "var(--loss)"} w={260} h={48} />
       </div>
 
-      <div className="dc-math">
-        <div className="math-row">
-          <span className="ui">Purchase</span>
-          <span className="mono">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-3 text-[12.5px]">
+          <span className="font-ui text-secondary">Purchase</span>
+          <span className="font-mono text-primary text-[12.5px]">
             {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? "S$" + NF(d.buyPx, 2) : NF(d.buyPx, 2) + " " + d.ccy}
           </span>
         </div>
-        <div className="math-row sub">
-          <span className="ui muted">
+        <div className="flex items-center justify-between gap-3 text-[12.5px] -mt-1">
+          <span className="font-ui text-secondary text-[11px]">
             {d.buyDate}{d.ccy !== "SGD" ? ` · FX ${rate(d.buyFx)}` : ""}
           </span>
           <span />
         </div>
-        <div className="math-row">
-          <span className="ui">Current</span>
-          <span className="mono">
+        <div className="flex items-center justify-between gap-3 text-[12.5px]">
+          <span className="font-ui text-secondary">Current</span>
+          <span className="font-mono text-primary text-[12.5px]">
             {d.buyUnits.toLocaleString()} @ {d.ccy === "SGD" ? "S$" + NF(d.curPx, 2) : NF(d.curPx, 2) + " " + d.ccy}
           </span>
         </div>
         {d.ccy !== "SGD" && (
-          <div className="math-row sub">
-            <span className="ui muted">FX {rate(d.curFx)}</span>
+          <div className="flex items-center justify-between gap-3 text-[12.5px] -mt-1">
+            <span className="font-ui text-secondary text-[11px]">FX {rate(d.curFx)}</span>
             <span />
           </div>
         )}
-        <div className="dc-div" />
-        <div className="math-row">
-          <span className="ui" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+        <div className="my-1 h-px bg-subtle" />
+        <div className="flex items-center justify-between gap-3 text-[12.5px]">
+          <span className="font-ui" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
             Asset {h.assetGain >= 0 ? "gain" : "loss"}
           </span>
-          <span className="mono" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
+          <span className="font-mono text-[12.5px]" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>
             {d.ccy !== "SGD" ? `${assetGainNative < 0 ? "−" : "+"}${NF(assetGainNative, 0)} ${d.ccy} = ` : ""}
             {fmtSigned(h.assetGain)}
           </span>
         </div>
-        <div className="math-row">
-          <span className="ui" style={{ color: h.fxGain >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>
+        <div className="flex items-center justify-between gap-3 text-[12.5px]">
+          <span className="font-ui" style={{ color: h.fxGain >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>
             FX {h.fxGain >= 0 ? "gain" : "drag"}
           </span>
-          <span className="mono" style={{ color: h.fxGain >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>
+          <span className="font-mono text-[12.5px]" style={{ color: h.fxGain >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>
             {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
           </span>
         </div>
-        <div className="math-row total">
-          <span className="ui">Total gain</span>
-          <span className="mono">
+        <div className="flex items-center justify-between gap-3 text-[12.5px] mt-[3px] border-t border-subtle pt-[7px]">
+          <span className="font-ui text-primary font-semibold">Total gain</span>
+          <span className="font-mono text-primary text-[12.5px] font-semibold">
             {fmtSigned(total)}{" "}
             <span style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>({pct(h.totalPct)})</span>
           </span>
@@ -251,21 +272,21 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
       </div>
 
       {mode === "confirm-delete" ? (
-        <div className="dc-confirm">
-          <span className="ui" style={{ fontSize: 12.5 }}>Delete <strong>{h.name}</strong> permanently?</span>
-          <div className="dc-actions">
-            <button className="dc-btn del" onClick={handleDelete} disabled={saving}>
+        <div className="flex flex-col gap-2.5 rounded-[10px] border border-[rgba(239,68,68,0.18)] bg-[rgba(239,68,68,0.05)] px-3.5 py-3">
+          <span className="font-ui" style={{ fontSize: 12.5 }}>Delete <strong>{h.name}</strong> permanently?</span>
+          <div className="flex gap-2">
+            <button className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-[rgba(239,68,68,0.35)] hover:text-loss disabled:cursor-not-allowed disabled:opacity-50" onClick={handleDelete} disabled={saving}>
               {saving ? "Deleting…" : "Yes, delete"}
             </button>
-            <button className="dc-btn edit" onClick={() => setMode("view")}>Cancel</button>
+            <button className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setMode("view")}>Cancel</button>
           </div>
         </div>
       ) : (
-        <div className="dc-actions">
-          <button className="dc-btn edit" onClick={() => setMode("edit")}>
+        <div className="flex gap-2">
+          <button className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setMode("edit")}>
             <Icon name="sliders" size={13} />Edit
           </button>
-          <button className="dc-btn del" onClick={() => setMode("confirm-delete")}>
+          <button className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-[rgba(239,68,68,0.35)] hover:text-loss disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setMode("confirm-delete")}>
             <Icon name="x" size={13} />Delete
           </button>
         </div>
@@ -372,13 +393,13 @@ export default function HoldingsPage() {
 
   const Th = ({ k, children, right }: { k?: SortKey; children: React.ReactNode; right?: boolean }) => (
     <th
-      className={right ? "r" : ""}
+      className={"select-none border-b border-subtle px-4 py-3.5 font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted light:border-b-black/[.12] " + (right ? "text-right" : "text-left")}
       onClick={k ? () => sortBy(k) : undefined}
       style={{ cursor: k ? "pointer" : "default" }}
     >
       {children}
       {k && (
-        <span className="sort-ar">
+        <span className="text-gold text-[11px]">
           {sort.k === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}
         </span>
       )}
@@ -399,24 +420,25 @@ export default function HoldingsPage() {
   };
 
   return (
-    <div className="tab-body">
+    <div className="flex w-full min-w-0 flex-col gap-[18px]">
       {/* filter bar */}
-      <div className="filterbar reveal">
-        <div className="search">
+      <div className="flex flex-wrap items-center gap-3 max-bp768:gap-2 max-bp600:flex-col max-bp600:items-stretch animate-reveal">
+        <div className="flex flex-1 items-center gap-[9px] rounded-[10px] border border-subtle bg-surface px-[13px] py-[9px] text-muted min-w-[220px] max-bp600:w-full max-bp600:min-w-0">
           <Icon name="search" size={15} />
           <input
             ref={searchRef}
+            className="flex-1 border-none bg-transparent font-ui text-[13px] text-primary outline-none placeholder:text-muted"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search holdings…"
           />
-          <kbd>/</kbd>
+          <kbd className="rounded-[4px] border border-subtle px-1.5 py-px font-mono text-[10px] text-muted">/</kbd>
         </div>
-        <div className="fpills">
+        <div className="flex flex-wrap gap-1.5 max-bp768:gap-1">
           {TYPES.map((t) => (
             <button
               key={t}
-              className={"fpill" + (typeFilter === t ? " active" : "")}
+              className={"cursor-pointer rounded-lg border px-[13px] py-[7px] font-ui text-xs transition-all duration-150 max-bp768:px-2.5 max-bp768:py-1.5 max-bp768:text-[11.5px] " + (typeFilter === t ? "border-gold-soft bg-wash text-gold" : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")}
               onClick={() => setTypeFilter(t)}
             >
               {t}
@@ -424,27 +446,27 @@ export default function HoldingsPage() {
           ))}
         </div>
         <button
-          className={"icon-btn ghost" + (groupView ? " gview-active" : "")}
+          className={"flex cursor-pointer items-center gap-[7px] rounded-[9px] border bg-surface px-[13px] py-2 font-ui text-[12.5px] transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50 " + (groupView ? "border-gold-soft text-gold" : "border-subtle text-secondary")}
           onClick={() => setGroupView((v) => !v)}
           title={groupView ? "Switch to flat view" : "Switch to grouped view"}
         >
           <Icon name={groupView ? "layers" : "list"} size={15} />
-          <span className="ui">{groupView ? "Grouped" : "Flat"}</span>
+          <span className="font-ui">{groupView ? "Grouped" : "Flat"}</span>
         </button>
-        <button className="icon-btn ghost" onClick={handleCsvExport}>
+        <button className="flex cursor-pointer items-center gap-[7px] rounded-[9px] border border-subtle bg-surface px-[13px] py-2 font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={handleCsvExport}>
           <Icon name="download" size={15} />
-          <span className="ui">CSV</span>
+          <span className="font-ui">CSV</span>
         </button>
-        <button className="icon-btn ghost" onClick={handleRefresh} disabled={refreshing}>
+        <button className="flex cursor-pointer items-center gap-[7px] rounded-[9px] border border-subtle bg-surface px-[13px] py-2 font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={handleRefresh} disabled={refreshing}>
           <Icon name={refreshing ? "loader" : "refresh-cw"} size={15} style={refreshing ? { animation: "spin 1s linear infinite" } : undefined} />
-          <span className="ui">{refreshing ? "Refreshing…" : "Refresh Prices"}</span>
+          <span className="font-ui">{refreshing ? "Refreshing…" : "Refresh Prices"}</span>
         </button>
-        {refreshMsg && <span className="ui muted xs refresh-msg">{refreshMsg}</span>}
+        {refreshMsg && <span className="font-ui text-secondary text-[11px] tracking-[.04em] opacity-70 transition-opacity duration-300">{refreshMsg}</span>}
       </div>
 
       {/* table */}
-      <div className="card no-pad reveal" style={{ animationDelay: ".05s" }}>
-        <table className="htable">
+      <div className="card p-0 overflow-x-auto overflow-y-hidden max-bp768:overflow-y-visible animate-reveal" style={{ animationDelay: ".05s" }}>
+        <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
           <thead>
             <tr>
               <Th k="name">Name / Ticker</Th>
@@ -465,39 +487,40 @@ export default function HoldingsPage() {
                   const isMulti = group.lots.length > 1;
                   const expanded = isExpanded(group);
                   const gTotal = group.assetGain + group.fxGain;
-                  const gStrat = STRAT[group.lots[0].strategy] ?? { label: group.lots[0].strategy, cls: "st-gray" };
+                  const gStrat = STRAT[group.lots[0].strategy] ?? { label: group.lots[0].strategy, cls: STRAT_GRAY };
+                  const gSel = !isMulti && picked.has(group.lots[0].id);
 
                   const groupRow = (
                     <tr
                       key={gk}
-                      className={"hrow" + (isMulti ? " group-hd" : "") + (!isMulti && picked.has(group.lots[0].id) ? " sel" : "")}
+                      className={isMulti ? ROW_GROUP_HD : (gSel ? ROW_SEL : ROW_UNSEL)}
                       onClick={() => isMulti ? toggleGroup(gk) : toggle(group.lots[0])}
                     >
-                      <td>
-                        <div className="cell-name">
+                      <td className={CELL + (gSel ? SEL_SHADOW : "")}>
+                        <div className="flex items-center gap-2.5">
                           {isMulti && (
-                            <span className="group-chevron" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
+                            <span className="flex shrink-0 text-muted transition-transform duration-200" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
                               <Icon name="chevron" size={14} />
                             </span>
                           )}
-                          <span className="row-ic"><Icon name={group.icon as never} size={15} /></span>
-                          <span className="ui" style={isMulti ? { fontWeight: 600 } : undefined}>{group.name}</span>
-                          {group.ticker !== "—" && <span className="mono ticker">{group.ticker}</span>}
-                          {isMulti && <span className="lots-badge">{group.lots.length} lots</span>}
+                          <span className="grid size-7 shrink-0 place-items-center rounded-[7px] border border-subtle bg-elevated text-gold"><Icon name={group.icon as never} size={15} /></span>
+                          <span className="font-ui text-[13px] overflow-hidden text-ellipsis whitespace-nowrap" style={isMulti ? { fontWeight: 600 } : undefined}>{group.name}</span>
+                          {group.ticker !== "—" && <span className="font-mono text-[10.5px] tracking-[.05em] text-muted">{group.ticker}</span>}
+                          {isMulti && <span className="ml-1 inline-flex items-center rounded-[5px] bg-[rgba(212,163,78,.12)] px-[7px] py-0.5 font-ui text-[10.5px] font-semibold tracking-[.04em] text-gold">{group.lots.length} lots</span>}
                         </div>
                       </td>
-                      <td><span className="ui dim">{group.assetType}</span></td>
-                      <td><span className="ui dim">{group.lots[0].broker}</span></td>
-                      <td><span className={"strat " + gStrat.cls}>{gStrat.label}</span></td>
-                      <td className="r mono">{fmtVal(group.valueSGD)}</td>
-                      <td className="r mono" style={{ color: group.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(group.assetGain)}</td>
-                      <td className="r mono" style={{ color: group.fxGain > 0 ? "var(--fx-positive)" : group.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                      <td className={CELL}><span className="font-ui text-secondary">{group.assetType}</span></td>
+                      <td className={CELL}><span className="font-ui text-secondary">{group.lots[0].broker}</span></td>
+                      <td className={CELL}><span className={STRAT_BASE + " " + gStrat.cls}>{gStrat.label}</span></td>
+                      <td className={CELL_R}>{fmtVal(group.valueSGD)}</td>
+                      <td className={CELL_R} style={{ color: group.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(group.assetGain)}</td>
+                      <td className={CELL_R} style={{ color: group.fxGain > 0 ? "var(--fx-positive)" : group.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
                         {group.fxGain === 0 ? "—" : fmtSigned(group.fxGain)}
                       </td>
-                      <td className="r mono bold" style={{ color: gTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(group.totalPct)}</td>
-                      <td>
-                        <span className="ccy-mini">
-                          {group.flag} <span className="mono dim">{group.currency}</span>
+                      <td className={CELL_R_BOLD} style={{ color: gTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(group.totalPct)}</td>
+                      <td className={CELL}>
+                        <span className="text-xs whitespace-nowrap">
+                          {group.flag} <span className="font-mono text-secondary">{group.currency}</span>
                         </span>
                       </td>
                     </tr>
@@ -508,30 +531,30 @@ export default function HoldingsPage() {
                   const lotRows = group.lots.map((h) => {
                     const sel = picked.has(h.id);
                     const lotTotal = h.assetGain + h.fxGain;
-                    const lStrat = STRAT[h.strategy] ?? { label: h.strategy, cls: "st-gray" };
+                    const lStrat = STRAT[h.strategy] ?? { label: h.strategy, cls: STRAT_GRAY };
                     return (
                       <tr
                         key={h.id}
-                        className={"hrow lot-row" + (sel ? " sel" : "")}
+                        className={sel ? ROW_LOT_SEL : ROW_LOT_UNSEL}
                         onClick={(e) => { e.stopPropagation(); toggle(h); }}
                       >
-                        <td>
-                          <div className="cell-name lot-indent">
-                            <span className="lot-connector" />
-                            <span className="ui dim">{h.buyDate}</span>
-                            <span className="mono dim">· {h.units.toLocaleString()} units</span>
+                        <td className={LOT_CELL_FIRST + (sel ? SEL_SHADOW : "")}>
+                          <div className="flex items-center gap-[7px]">
+                            <span className="mb-[3px] size-2.5 shrink-0 rounded-bl-[2px] border-b-[1.5px] border-l-[1.5px] border-subtle" />
+                            <span className="font-ui text-[13px] text-secondary overflow-hidden text-ellipsis whitespace-nowrap">{h.buyDate}</span>
+                            <span className="font-mono text-secondary">· {h.units.toLocaleString()} units</span>
                           </div>
                         </td>
-                        <td><span className="ui dim">{h.assetType}</span></td>
-                        <td><span className="ui dim">{h.broker}</span></td>
-                        <td><span className={"strat " + lStrat.cls}>{lStrat.label}</span></td>
-                        <td className="r mono">{fmtVal(h.valueSGD)}</td>
-                        <td className="r mono" style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(h.assetGain)}</td>
-                        <td className="r mono" style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                        <td className={LOT_CELL}><span className="font-ui text-secondary">{h.assetType}</span></td>
+                        <td className={LOT_CELL}><span className="font-ui text-secondary">{h.broker}</span></td>
+                        <td className={LOT_CELL}><span className={STRAT_BASE + " " + lStrat.cls}>{lStrat.label}</span></td>
+                        <td className={LOT_CELL_R}>{fmtVal(h.valueSGD)}</td>
+                        <td className={LOT_CELL_R} style={{ color: h.assetGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(h.assetGain)}</td>
+                        <td className={LOT_CELL_R} style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
                           {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
                         </td>
-                        <td className="r mono bold" style={{ color: lotTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
-                        <td />
+                        <td className={LOT_CELL_R_BOLD} style={{ color: lotTotal >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
+                        <td className={LOT_CELL} />
                       </tr>
                     );
                   });
@@ -541,28 +564,28 @@ export default function HoldingsPage() {
               : rows.map((h) => {
                   const sel = picked.has(key(h));
                   const total = h.assetGain + h.fxGain;
-                  const strat = STRAT[h.strategy] ?? { label: h.strategy, cls: "st-gray" };
+                  const strat = STRAT[h.strategy] ?? { label: h.strategy, cls: STRAT_GRAY };
                   return (
-                    <tr key={key(h)} className={"hrow" + (sel ? " sel" : "")} onClick={() => toggle(h)}>
-                      <td>
-                        <div className="cell-name">
-                          <span className="row-ic"><Icon name={h.icon as never} size={15} /></span>
-                          <span className="ui">{h.name}</span>
-                          <span className="mono ticker">{h.ticker}</span>
+                    <tr key={key(h)} className={sel ? ROW_SEL : ROW_UNSEL} onClick={() => toggle(h)}>
+                      <td className={CELL + (sel ? SEL_SHADOW : "")}>
+                        <div className="flex items-center gap-2.5">
+                          <span className="grid size-7 shrink-0 place-items-center rounded-[7px] border border-subtle bg-elevated text-gold"><Icon name={h.icon as never} size={15} /></span>
+                          <span className="font-ui text-[13px] overflow-hidden text-ellipsis whitespace-nowrap">{h.name}</span>
+                          <span className="font-mono text-[10.5px] tracking-[.05em] text-muted">{h.ticker}</span>
                         </div>
                       </td>
-                      <td><span className="ui dim">{h.assetType}</span></td>
-                      <td><span className="ui dim">{h.broker}</span></td>
-                      <td><span className={"strat " + strat.cls}>{strat.label}</span></td>
-                      <td className="r mono">{fmtVal(h.valueSGD)}</td>
-                      <td className="r mono" style={{ color: "var(--gain)" }}>{fmtSigned(h.assetGain)}</td>
-                      <td className="r mono" style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
+                      <td className={CELL}><span className="font-ui text-secondary">{h.assetType}</span></td>
+                      <td className={CELL}><span className="font-ui text-secondary">{h.broker}</span></td>
+                      <td className={CELL}><span className={STRAT_BASE + " " + strat.cls}>{strat.label}</span></td>
+                      <td className={CELL_R}>{fmtVal(h.valueSGD)}</td>
+                      <td className={CELL_R} style={{ color: "var(--gain)" }}>{fmtSigned(h.assetGain)}</td>
+                      <td className={CELL_R} style={{ color: h.fxGain > 0 ? "var(--fx-positive)" : h.fxGain < 0 ? "var(--fx-negative)" : "var(--text-muted)" }}>
                         {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
                       </td>
-                      <td className="r mono bold" style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
-                      <td>
-                        <span className="ccy-mini">
-                          {h.flag} <span className="mono dim">{h.currency}</span>
+                      <td className={CELL_R_BOLD} style={{ color: total >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(h.totalPct)}</td>
+                      <td className={CELL}>
+                        <span className="text-xs whitespace-nowrap">
+                          {h.flag} <span className="font-mono text-secondary">{h.currency}</span>
                         </span>
                       </td>
                     </tr>
@@ -571,8 +594,8 @@ export default function HoldingsPage() {
             }
             {(groupView ? groups : rows).length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", padding: "32px 0" }}>
-                  <span className="ui muted">No holdings match.</span>
+                <td className="text-[13px]" colSpan={9} style={{ textAlign: "center", padding: "32px 0" }}>
+                  <span className="font-ui text-secondary">No holdings match.</span>
                 </td>
               </tr>
             )}
@@ -581,23 +604,23 @@ export default function HoldingsPage() {
       </div>
 
       {/* compare / inspector tray */}
-      <div className="compare reveal" style={{ animationDelay: ".1s" }}>
-        <div className="compare-head">
-          <span className="card-title">Inspector</span>
-          <span className="ui muted">
+      <div className="flex flex-col gap-3 animate-reveal" style={{ animationDelay: ".1s" }}>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">Inspector</span>
+          <span className="font-ui text-secondary text-[11.5px]">
             {compareCards.length
               ? `Comparing ${compareCards.length} holding${compareCards.length > 1 ? "s" : ""} · click rows to add or remove`
               : "Click a holding to inspect — open several to compare side by side"}
           </span>
         </div>
         {compareCards.length > 0 ? (
-          <div className="compare-tray">
+          <div className="flex gap-3.5 overflow-x-auto pb-1.5">
             {compareCards.map((h) => (
               <DetailCard key={key(h)} h={h} onClose={() => toggle(h)} />
             ))}
           </div>
         ) : (
-          <div className="compare-empty ui muted">No holdings selected.</div>
+          <div className="rounded-xl border border-dashed border-subtle bg-surface p-6 text-center text-[13px] font-ui text-secondary">No holdings selected.</div>
         )}
       </div>
     </div>

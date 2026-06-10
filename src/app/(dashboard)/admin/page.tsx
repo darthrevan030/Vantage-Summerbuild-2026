@@ -112,57 +112,55 @@ export default async function AdminPage() {
   }));
 
   return (
-    <div className="tab-body">
-      <div className="an-head reveal">
+    <div className="flex w-full min-w-0 flex-col gap-[18px]">
+      <div className="mb-0.5 flex flex-wrap items-end justify-between gap-[18px] animate-reveal">
         <div>
-          <div className="an-eyebrow">Admin</div>
-          <h2>Dashboard</h2>
-          <div className="an-sub">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[.14em] text-gold">Admin</div>
+          <h2 className="mb-1 mt-1.5 font-serif text-[26px] font-normal tracking-[.2px]">Dashboard</h2>
+          <div className="max-w-[440px] text-[13px] text-secondary">
             System health, user management, and price cache status.
           </div>
         </div>
       </div>
 
       {/* Stats row */}
-      <div className="stat-row reveal">
-        <div className="stat-card">
-          <span className="stat-label">Total Users</span>
-          <span className="mono stat-value">{tableRows.length}</span>
+      <div className="grid grid-cols-4 gap-3.5 animate-reveal max-bp1080:grid-cols-2 max-bp480:grid-cols-2">
+        <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Total Users</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]">{tableRows.length}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Total Holdings</span>
-          <span className="mono stat-value">{totalHoldings ?? 0}</span>
+        <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Total Holdings</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]">{totalHoldings ?? 0}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Stale Prices</span>
+        <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Stale Prices</span>
           <span
-            className="mono stat-value"
+            className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]"
             style={{ color: (staleCount ?? 0) > 0 ? "var(--loss)" : "var(--gain)" }}
           >
             {staleCount ?? 0}
           </span>
-          <span className="ui stat-sub muted">null or &gt;1 h old</span>
+          <span className="font-ui text-xs text-secondary">null or &gt;1 h old</span>
         </div>
       </div>
 
       {/* User table */}
-      <div className="card reveal" style={{ animationDelay: ".06s" }}>
-        <div className="card-head">
-          <span className="card-title">Users</span>
-          <span className="ui muted">{tableRows.length} accounts</span>
+      <div className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3" style={{ animationDelay: ".06s" }}>
+        <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">Users</span>
+          <span className="font-ui text-[11px] text-secondary">{tableRows.length} accounts</span>
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="w-full border-collapse">
           <thead>
-            <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+            <tr className="border-b border-subtle">
               {["Email", "Joined", "Display Name", "Holdings", "Role"].map((h, i) => (
                 <th
                   key={h}
-                  className="ui muted xs"
-                  style={{
-                    textAlign: i >= 3 ? "right" : "left",
-                    padding: "8px 0",
-                    fontWeight: 500,
-                  }}
+                  className={
+                    "py-2 px-0 font-ui text-[11px] font-medium tracking-[.04em] text-secondary " +
+                    (i >= 3 ? "text-right" : "text-left")
+                  }
                 >
                   {h}
                 </th>
@@ -171,27 +169,24 @@ export default async function AdminPage() {
           </thead>
           <tbody>
             {tableRows.map((row) => (
-              <tr key={row.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                <td className="mono" style={{ padding: "10px 0", fontSize: 12 }}>
+              <tr key={row.id} className="border-b border-subtle">
+                <td className="py-2.5 font-mono text-xs tabular-nums">
                   {row.email}
                 </td>
-                <td className="ui muted" style={{ padding: "10px 0", fontSize: 12 }}>
+                <td className="py-2.5 font-ui text-xs text-secondary">
                   {new Date(row.joinedAt).toLocaleDateString("en-SG", {
                     year: "numeric",
                     month: "short",
                     day: "numeric",
                   })}
                 </td>
-                <td className="ui" style={{ padding: "10px 0", fontSize: 12 }}>
+                <td className="py-2.5 font-ui text-xs">
                   {row.displayName || "—"}
                 </td>
-                <td
-                  className="mono"
-                  style={{ padding: "10px 0", fontSize: 12, textAlign: "right" }}
-                >
+                <td className="py-2.5 text-right font-mono text-xs tabular-nums">
                   {row.holdingCount}
                 </td>
-                <td style={{ padding: "10px 0", textAlign: "right" }}>
+                <td className="py-2.5 text-right">
                   <RoleToggle userId={row.id} initialRole={row.role} />
                 </td>
               </tr>
@@ -201,38 +196,32 @@ export default async function AdminPage() {
       </div>
 
       {/* Price cache health */}
-      <div className="card reveal" style={{ animationDelay: ".12s" }}>
-        <div className="card-head">
-          <span className="card-title">Price Cache Health</span>
+      <div className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3" style={{ animationDelay: ".12s" }}>
+        <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">Price Cache Health</span>
           <span
-            className="ui muted"
+            className="font-ui text-[11px] text-secondary"
             style={{ color: staleTickers.length > 0 ? "var(--loss)" : undefined }}
           >
             {staleTickers.length === 0 ? "All fresh" : `${staleTickers.length} stale`}
           </span>
         </div>
         {staleTickers.length === 0 ? (
-          <div className="ui muted" style={{ padding: "12px 0", fontSize: 13 }}>
+          <div className="py-3 font-ui text-[13px] text-secondary">
             All prices were refreshed within the last hour.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div className="flex flex-col">
             {staleTickers.map((t) => (
               <div
                 key={t.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "9px 0",
-                  borderBottom: "1px solid var(--border-subtle)",
-                }}
+                className="flex items-center justify-between border-b border-subtle py-[9px]"
               >
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <span className="mono" style={{ fontSize: 12 }}>{t.ticker}</span>
-                  <span className="ui muted" style={{ fontSize: 12 }}>{t.name}</span>
+                <div className="flex items-center gap-2.5">
+                  <span className="font-mono text-xs tabular-nums">{t.ticker}</span>
+                  <span className="font-ui text-xs text-secondary">{t.name}</span>
                 </div>
-                <span className="ui muted xs">
+                <span className="font-ui text-[11px] tracking-[.04em] text-secondary">
                   {t.priceRefreshedAt
                     ? new Date(t.priceRefreshedAt).toLocaleString("en-SG")
                     : "never refreshed"}
@@ -244,10 +233,10 @@ export default async function AdminPage() {
       </div>
 
       {/* Currency editor */}
-      <div className="card reveal" style={{ animationDelay: ".18s" }}>
-        <div className="card-head">
-          <span className="card-title">Supported Currencies</span>
-          <span className="ui muted">
+      <div className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3" style={{ animationDelay: ".18s" }}>
+        <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">Supported Currencies</span>
+          <span className="font-ui text-[11px] text-secondary">
             {(currencyRows ?? []).filter((c: CurrencyRow) => c.active).length} active
           </span>
         </div>
@@ -265,10 +254,10 @@ export default async function AdminPage() {
       </div>
 
       {/* Exchange editor */}
-      <div className="card reveal" style={{ animationDelay: ".24s" }}>
-        <div className="card-head">
-          <span className="card-title">Supported Exchanges</span>
-          <span className="ui muted">
+      <div className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3" style={{ animationDelay: ".24s" }}>
+        <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">Supported Exchanges</span>
+          <span className="font-ui text-[11px] text-secondary">
             {(exchangeRows ?? []).filter((e: ExchangeRow) => e.active).length} active
           </span>
         </div>

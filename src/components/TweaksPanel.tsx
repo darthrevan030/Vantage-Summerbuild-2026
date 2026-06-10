@@ -8,38 +8,45 @@ interface TweakState {
   lightMode: boolean;
 }
 
-const DEFAULTS: TweakState = {
-  accent: "#b79cff",
-  lightMode: false,
-};
+const DARK_ACCENT = "#b79cff";
+const LIGHT_ACCENT = "#6b4bd6";
+
+/* Matches max-bp600 (width < 600px): the panel becomes a bottom sheet there */
+const MOBILE_MQ = "(max-width: 599.98px)";
 
 function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-      <span style={{ fontSize: 12, color: "rgba(41,38,27,.72)", fontWeight: 500 }}>{label}</span>
+    <div className="flex items-center justify-between gap-2.5">
+      <span className="text-xs font-medium text-[rgba(41,38,27,.72)]">{label}</span>
       <button
         type="button"
         role="switch"
         aria-checked={value}
         onClick={() => onChange(!value)}
-        style={{
-          position: "relative", width: 32, height: 18, border: 0, borderRadius: 999,
-          background: value ? "#34c759" : "rgba(0,0,0,.15)", transition: "background .15s", cursor: "default", padding: 0,
-        }}
+        className={
+          "relative h-[18px] w-8 rounded-full border-0 p-0 transition-colors duration-150 " +
+          (value ? "bg-[#34c759]" : "bg-black/15")
+        }
       >
-        <i style={{
-          position: "absolute", top: 2, left: 2, width: 14, height: 14, borderRadius: "50%",
-          background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.25)",
-          transition: "transform .15s", transform: value ? "translateX(14px)" : "translateX(0)",
-          display: "block",
-        }} />
+        <i
+          className={
+            "absolute left-0.5 top-0.5 block size-3.5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.25)] transition-transform duration-150 " +
+            (value ? "translate-x-3.5" : "translate-x-0")
+          }
+        />
       </button>
     </div>
   );
 }
 
 export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tw, setTw] = useState<TweakState>(DEFAULTS);
+  // Initialise from the DOM: the root layout's theme script may have added
+  // .light before this mounts — defaults here must mirror it, not stomp it.
+  const [tw, setTw] = useState<TweakState>(() => {
+    if (typeof document === "undefined") return { accent: DARK_ACCENT, lightMode: false };
+    const light = document.documentElement.classList.contains("light");
+    return { accent: light ? LIGHT_ACCENT : DARK_ACCENT, lightMode: light };
+  });
   const dragRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef({ x: 16, y: 16 });
   const PAD = 16;
@@ -51,14 +58,22 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
   useEffect(() => { applyAccent(tw.accent); }, [tw.accent]);
   useEffect(() => {
     document.documentElement.classList.toggle("light", tw.lightMode);
-    if (tw.lightMode && tw.accent === "#b79cff") setTweak("accent", "#6b4bd6");
-    if (!tw.lightMode && tw.accent === "#6b4bd6") setTweak("accent", "#b79cff");
+    // Sync the default accent to the active theme on toggle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (tw.lightMode && tw.accent === DARK_ACCENT) setTweak("accent", LIGHT_ACCENT);
+    if (!tw.lightMode && tw.accent === LIGHT_ACCENT) setTweak("accent", DARK_ACCENT);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tw.lightMode]);
 
   const clamp = useCallback(() => {
     const panel = dragRef.current;
     if (!panel) return;
+    if (window.matchMedia(MOBILE_MQ).matches) {
+      // Bottom sheet: positioning belongs to the classes, not inline styles
+      panel.style.right = "";
+      panel.style.bottom = "";
+      return;
+    }
     const w = panel.offsetWidth, h = panel.offsetHeight;
     const maxX = Math.max(PAD, window.innerWidth - w - PAD);
     const maxY = Math.max(PAD, window.innerHeight - h - PAD);
@@ -76,6 +91,7 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
   }, [open, clamp]);
 
   const onDragStart = (e: React.MouseEvent) => {
+    if (window.matchMedia(MOBILE_MQ).matches) return;
     const panel = dragRef.current;
     if (!panel) return;
     const r = panel.getBoundingClientRect();
@@ -96,52 +112,50 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
   return (
     <div
       ref={dragRef}
-      style={{
-        position: "fixed", right: offsetRef.current.x, bottom: offsetRef.current.y,
-        zIndex: 2147483646, width: 240, maxHeight: "calc(100vh - 32px)",
-        display: "flex", flexDirection: "column",
-        background: "rgba(250,249,247,.92)", color: "#29261b",
-        backdropFilter: "blur(24px) saturate(160%)", WebkitBackdropFilter: "blur(24px) saturate(160%)",
-        border: ".5px solid rgba(255,255,255,.6)", borderRadius: 14,
-        boxShadow: "0 1px 0 rgba(255,255,255,.5) inset, 0 12px 40px rgba(0,0,0,.18)",
-        font: "11.5px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif",
-      }}
+      className={
+        "fixed right-4 bottom-4 z-[2147483646] flex w-60 max-h-[calc(100vh-32px)] flex-col " +
+        "rounded-[14px] border-[0.5px] border-white/60 bg-[rgba(250,249,247,.92)] text-[#29261b] " +
+        "shadow-[0_1px_0_rgba(255,255,255,.5)_inset,0_12px_40px_rgba(0,0,0,.18)] " +
+        "backdrop-blur-[24px] backdrop-saturate-[1.6] font-sans text-[11.5px] leading-[1.4] " +
+        "max-bp600:inset-x-3 max-bp600:top-auto max-bp600:bottom-3 max-bp600:w-auto max-bp600:max-h-[70vh]"
+      }
     >
       <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 8px 10px 14px", cursor: "move", userSelect: "none" }}
+        className="flex cursor-move select-none items-center justify-between py-2.5 pl-3.5 pr-2 max-bp600:cursor-default"
         onMouseDown={onDragStart}
       >
-        <b style={{ fontSize: 12, fontWeight: 600, letterSpacing: ".01em" }}>Tweaks</b>
+        <b className="text-xs font-semibold tracking-[.01em]">Tweaks</b>
         <button
-          style={{ appearance: "none", border: 0, background: "transparent", color: "rgba(41,38,27,.55)", width: 22, height: 22, borderRadius: 6, cursor: "default", fontSize: 13 }}
+          className="size-[22px] rounded-md border-0 bg-transparent text-[13px] text-[rgba(41,38,27,.55)]"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={onClose}
         >✕</button>
       </div>
-      <div style={{ padding: "2px 14px 14px", display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
-        <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "rgba(41,38,27,.45)" }}>Appearance</div>
-        <Toggle label="Light mode" value={tw.lightMode} onChange={(v) => setTweak("lightMode", v)} />
+      <div className="flex flex-col gap-2.5 overflow-y-auto px-3.5 pb-3.5 pt-0.5">
+        <div className="text-[10px] font-semibold uppercase tracking-[.06em] text-[rgba(41,38,27,.45)]">Appearance</div>
+        <Toggle
+          label="Light mode"
+          value={tw.lightMode}
+          onChange={(v) => {
+            setTweak("lightMode", v);
+            try { localStorage.setItem("theme", v ? "light" : "dark"); } catch {}
+          }}
+        />
         <div>
-          <div style={{ fontSize: 12, color: "rgba(41,38,27,.72)", fontWeight: 500, marginBottom: 6 }}>Accent colour</div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              background: tw.accent,
-              border: ".5px solid rgba(0,0,0,.18)",
-              boxShadow: "0 2px 6px rgba(0,0,0,.12)",
-              overflow: "hidden", position: "relative",
-            }}>
+          <div className="mb-1.5 text-xs font-medium text-[rgba(41,38,27,.72)]">Accent colour</div>
+          <label className="flex cursor-pointer items-center gap-2.5">
+            <div
+              className="relative size-8 shrink-0 overflow-hidden rounded-lg border-[0.5px] border-black/[.18] shadow-[0_2px_6px_rgba(0,0,0,.12)]"
+              style={{ background: tw.accent }}
+            >
               <input
                 type="color"
                 value={tw.accent}
                 onChange={(e) => setTweak("accent", e.target.value)}
-                style={{
-                  position: "absolute", inset: "-4px", width: "calc(100% + 8px)", height: "calc(100% + 8px)",
-                  opacity: 0, cursor: "pointer", border: "none", padding: 0,
-                }}
+                className="absolute -inset-1 h-[calc(100%+8px)] w-[calc(100%+8px)] cursor-pointer border-none p-0 opacity-0"
               />
             </div>
-            <span style={{ fontFamily: "ui-monospace,monospace", fontSize: 12, color: "rgba(41,38,27,.6)", letterSpacing: ".04em" }}>
+            <span className="font-mono text-xs tracking-[.04em] text-[rgba(41,38,27,.6)]">
               {tw.accent.toUpperCase()}
             </span>
           </label>

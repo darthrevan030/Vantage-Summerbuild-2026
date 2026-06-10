@@ -38,14 +38,16 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthPath =
     pathname.startsWith("/login") || pathname.startsWith("/auth");
+  // The marketing landing page is public for signed-out visitors only.
+  const isLanding = pathname === "/";
 
-  if (!user && !isAuthPath) {
+  if (!user && !isAuthPath && !isLanding) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && pathname === "/login") {
+  if (user && (pathname === "/login" || isLanding)) {
     const url = request.nextUrl.clone();
     url.pathname = "/overview";
     return NextResponse.redirect(url);

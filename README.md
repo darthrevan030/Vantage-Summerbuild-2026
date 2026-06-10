@@ -34,8 +34,8 @@ Live prices pull from global exchanges via EODHD (equities), CoinGecko (crypto),
 | Language | TypeScript + React 19 | Type safety across the DB→API→UI boundary |
 | Auth | Supabase (magic link + Google OAuth, PKCE) | No password storage; PKCE prevents token interception on redirect |
 | Database | Supabase Postgres + RLS | Row-level security enforced at the PostgREST layer, not just in app code |
-| Styling | Plain CSS (terminal palette) | No runtime overhead; full control over the dark theme |
-| Notifications | React-Toastify | Replaces a hand-rolled system; auto-injects styles, dark theme override |
+| Styling | Tailwind CSS v4 (terminal palette tokens) | Utility-first on top of CSS-variable design tokens; dark/light themes swap at the token layer |
+| Notifications | sonner | Minimal stacked toasts; themed via the app's CSS variables so dark/light just works |
 | AI | Anthropic Claude Haiku (streaming) | Fast, cheap, SSE-friendly for the analysis tab |
 | Analytics | Vercel Analytics | Zero-config page view tracking |
 
