@@ -245,7 +245,7 @@ function ManualForm() {
                 }}>AUTO</span>
               )}
             </div>
-            <button className="icon-btn ghost sm" onClick={handleFetchFx} disabled={fetchingFx}>
+            <button className="flex items-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle bg-surface px-2.5 py-1.5 font-ui text-[11.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={handleFetchFx} disabled={fetchingFx}>
               <Icon name="refresh" size={14} />
               <span className="font-ui">{fetchingFx ? "Fetching…" : "Fetch rate"}</span>
             </button>
@@ -403,7 +403,7 @@ function ImportPanel() {
       )}
 
       <div className="flex gap-3 mt-5">
-        <button className="icon-btn outline" onClick={() => {
+        <button className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]" onClick={() => {
           fetch("/api/holdings").then((r) => r.json()).then((data) => {
             const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
             const a = document.createElement("a"); a.href = url; a.download = "portfolio-backup.json"; a.click();

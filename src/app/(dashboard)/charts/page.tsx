@@ -125,7 +125,7 @@ function PortfolioTrend() {
           if (!needsSync) return null;
           const label = portfolioSeriesDaily.length < 30 ? "Load history" : "Sync to today";
           return (
-            <button className="icon-btn ghost sm" onClick={handleBackfill} disabled={backfilling}>
+            <button className="flex items-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle bg-surface px-2.5 py-1.5 font-ui text-[11.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50" onClick={handleBackfill} disabled={backfilling}>
               {backfilling ? "Loading…" : label}
             </button>
           );
@@ -142,12 +142,12 @@ function PortfolioTrend() {
         <div className="flex items-center gap-3 mb-2.5 flex-wrap">
           <div className="flex flex-col gap-[3px]">
             <label className="font-ui text-secondary text-[10px] uppercase tracking-[.07em]">From</label>
-            <input type="month" className="date-inp font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={startDate.slice(0, 7)} onChange={(e) => handleStartChange(e.target.value)} />
+            <input type="month" className="font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={startDate.slice(0, 7)} onChange={(e) => handleStartChange(e.target.value)} />
           </div>
           <span className="font-ui text-secondary text-base mt-4">—</span>
           <div className="flex flex-col gap-[3px]">
             <label className="font-ui text-secondary text-[10px] uppercase tracking-[.07em]">To</label>
-            <input type="month" className="date-inp font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={endDate.slice(0, 7)} onChange={(e) => handleEndChange(e.target.value)} />
+            <input type="month" className="font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={endDate.slice(0, 7)} onChange={(e) => handleEndChange(e.target.value)} />
           </div>
           <button className="font-ui text-muted bg-transparent border-none text-xs cursor-pointer px-2 py-1.5 rounded-[7px] transition-[color,background] duration-150 mt-3 hover:text-gold hover:bg-wash" onClick={() => selectPreset(999)}>Reset</button>
         </div>
@@ -245,12 +245,12 @@ function FXImpactCard() {
             <div className="flex items-center gap-3 mb-2.5 flex-wrap">
               <div className="flex flex-col gap-[3px]">
                 <label className="font-ui text-secondary text-[10px] uppercase tracking-[.07em]">From</label>
-                <input type="month" className="date-inp font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={startDate.slice(0, 7)} onChange={(e) => handleStartChange(e.target.value)} />
+                <input type="month" className="font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={startDate.slice(0, 7)} onChange={(e) => handleStartChange(e.target.value)} />
               </div>
               <span className="font-ui text-secondary text-base mt-4">—</span>
               <div className="flex flex-col gap-[3px]">
                 <label className="font-ui text-secondary text-[10px] uppercase tracking-[.07em]">To</label>
-                <input type="month" className="date-inp font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={endDate.slice(0, 7)} onChange={(e) => handleEndChange(e.target.value)} />
+                <input type="month" className="font-mono bg-elevated border border-subtle rounded-[8px] px-2.5 py-[7px] text-primary text-xs outline-none transition-[border-color] duration-150 cursor-pointer focus:border-gold-soft" value={endDate.slice(0, 7)} onChange={(e) => handleEndChange(e.target.value)} />
               </div>
               <button className="font-ui text-muted bg-transparent border-none text-xs cursor-pointer px-2 py-1.5 rounded-[7px] transition-[color,background] duration-150 mt-3 hover:text-gold hover:bg-wash" onClick={() => selectPreset(999)}>Reset</button>
             </div>
