@@ -46,6 +46,7 @@ export function AuroraField() {
     const octx = off.getContext("2d")!;
 
     let W = 0, H = 0;
+    let isLight = false; // additive "lighter" only works on a dark base
     type RGB = [number, number, number];
     const palette: Record<"glow" | "blue" | "mag" | "gold", RGB> = {
       glow: [150, 110, 255], blue: [111, 176, 255], mag: [229, 138, 208], gold: [183, 156, 255],
@@ -57,6 +58,7 @@ export function AuroraField() {
       palette.blue = parseColor(sctx, cs.getPropertyValue("--fx-positive").trim() || "rgb(111,176,255)");
       palette.mag = parseColor(sctx, cs.getPropertyValue("--fx-negative").trim() || "rgb(229,138,208)");
       palette.gold = parseColor(sctx, cs.getPropertyValue("--gold").trim() || "rgb(183,156,255)");
+      isLight = document.documentElement.classList.contains("light");
       assignBlobColors();
     }
 
@@ -97,7 +99,11 @@ export function AuroraField() {
     function drawBlobs(t: number) {
       const ow = off.width, oh = off.height;
       octx.clearRect(0, 0, ow, oh);
-      octx.globalCompositeOperation = "lighter";
+      // Additive bloom on dark; gentle source-over tint on light (additive
+      // over a light base just blows everything out to white).
+      octx.globalCompositeOperation = isLight ? "source-over" : "lighter";
+      const peak = isLight ? 0.10 : 0.16;
+      const mid = isLight ? 0.028 : 0.04;
       for (const b of blobs) {
         // incommensurate drift → never visibly loops
         const dx = Math.sin(t * 0.06 * b.sp + b.px) * 0.06 + Math.sin(t * 0.013 * b.sp + b.py) * 0.04;
@@ -108,9 +114,9 @@ export function AuroraField() {
         const rad = b.r * Math.max(ow, oh);
         const [r, g, bl] = b.col;
         const grd = octx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-        // Subtle: a gentle violet glow over the near-black base, not a wash.
-        grd.addColorStop(0, `rgba(${r},${g},${bl},0.16)`);
-        grd.addColorStop(0.5, `rgba(${r},${g},${bl},0.04)`);
+        // Subtle: a gentle glow over the base, not a wash.
+        grd.addColorStop(0, `rgba(${r},${g},${bl},${peak})`);
+        grd.addColorStop(0.5, `rgba(${r},${g},${bl},${mid})`);
         grd.addColorStop(1, `rgba(${r},${g},${bl},0)`);
         octx.fillStyle = grd;
         octx.fillRect(0, 0, ow, oh);
@@ -124,17 +130,18 @@ export function AuroraField() {
       ctx!.imageSmoothingEnabled = true;
       ctx!.drawImage(off, 0, 0, W, H);
 
-      // cursor spotlight
+      // cursor spotlight — gold additive on dark, faint violet tint on light
       const sx = pointer.x * W, sy = pointer.y * H;
-      const [gr, gg, gb] = palette.gold;
+      const [gr, gg, gb] = isLight ? palette.glow : palette.gold;
+      const spot = pointer.active ? (isLight ? 0.05 : 0.2) : (isLight ? 0.025 : 0.05);
       const sg = ctx!.createRadialGradient(sx, sy, 0, sx, sy, Math.max(W, H) * 0.26);
-      sg.addColorStop(0, `rgba(${gr},${gg},${gb},${pointer.active ? 0.2 : 0.05})`);
+      sg.addColorStop(0, `rgba(${gr},${gg},${gb},${spot})`);
       sg.addColorStop(1, `rgba(${gr},${gg},${gb},0)`);
-      ctx!.globalCompositeOperation = "lighter";
+      ctx!.globalCompositeOperation = isLight ? "source-over" : "lighter";
       ctx!.fillStyle = sg;
       ctx!.fillRect(0, 0, W, H);
 
-      // particles
+      // particles (faint specks)
       for (const p of particles) {
         ctx!.beginPath();
         ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2);
