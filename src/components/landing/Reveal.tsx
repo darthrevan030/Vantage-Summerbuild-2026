@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { EASE_OUT } from "./motion-config";
 
-/* Fire-once scroll reveal: fade + 14px rise. Under prefers-reduced-motion
-   the hidden state is skipped entirely (no snap-in from the global
-   transition kill-switch). A <noscript> rule in the page guarantees
-   visibility without JS. */
+/* Fade + 14px rise on first scroll-into-view. Reduced-motion mounts visible
+   (initial={false}); the page's <noscript> rule keeps content visible without JS. */
 export function Reveal({
   children,
   delay = 0,
@@ -15,43 +14,17 @@ export function Reveal({
   delay?: number;
   className?: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [shown, setShown] = useState(false);
-
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      // Intentional: reveal immediately, no observer, no animation.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShown(true);
-      return;
-    }
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([e]) => {
-        if (e.isIntersecting) {
-          setShown(true);
-          io.disconnect();
-        }
-      },
-      { threshold: 0.15, rootMargin: "0px 0px -10% 0px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
+  const reduce = useReducedMotion();
   return (
-    <div
-      ref={ref}
+    <motion.div
       data-reveal
-      className={
-        className +
-        " transition-[opacity,transform] duration-[600ms] ease-[cubic-bezier(.2,.7,.2,1)] " +
-        (shown ? "translate-y-0 opacity-100" : "translate-y-3.5 opacity-0")
-      }
-      style={delay ? { transitionDelay: `${delay}ms` } : undefined}
+      className={className}
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.15, margin: "0px 0px -10% 0px" }}
+      transition={{ duration: 0.6, ease: EASE_OUT, delay: delay / 1000 }}
     >
       {children}
-    </div>
+    </motion.div>
   );
 }

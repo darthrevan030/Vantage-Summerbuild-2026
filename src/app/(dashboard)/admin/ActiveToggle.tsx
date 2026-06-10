@@ -1,5 +1,6 @@
 "use client";
 
+import { motion, useReducedMotion } from "motion/react";
 import { useOptimisticValue } from "@/hooks/useOptimisticToggle";
 
 interface ActiveToggleProps {
@@ -19,6 +20,7 @@ export function ActiveToggle({
   endpoint,
   codeMinWidth = 36,
 }: ActiveToggleProps) {
+  const reduce = useReducedMotion();
   const { value: active, busy, commit } = useOptimisticValue(
     initialActive,
     (next) =>
@@ -41,9 +43,10 @@ export function ActiveToggle({
           </span>
         )}
       </div>
-      <button
+      <motion.button
         onClick={() => commit(!active)}
         disabled={busy}
+        whileTap={reduce ? undefined : { scale: 0.96 }}
         className={
           "rounded-md border border-subtle px-3 py-1 font-[inherit] text-[11px] transition-all duration-150 " +
           (busy ? "cursor-wait " : "cursor-pointer ") +
@@ -51,7 +54,7 @@ export function ActiveToggle({
         }
       >
         {busy ? "…" : active ? "Active" : "Inactive"}
-      </button>
+      </motion.button>
     </div>
   );
 }

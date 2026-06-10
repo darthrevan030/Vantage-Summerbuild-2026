@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { applyAccent } from "@/lib/hexA";
+import { SPRING_SNAPPY } from "@/components/landing/motion-config";
 
 interface TweakState {
   accent: string;
@@ -15,6 +17,7 @@ const LIGHT_ACCENT = "#6b4bd6";
 const MOBILE_MQ = "(max-width: 599.98px)";
 
 function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  const reduce = useReducedMotion();
   return (
     <div className="flex items-center justify-between gap-2.5">
       <span className="text-xs font-medium text-[rgba(41,38,27,.72)]">{label}</span>
@@ -28,11 +31,10 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
           (value ? "bg-[#34c759]" : "bg-black/15")
         }
       >
-        <i
-          className={
-            "absolute left-0.5 top-0.5 block size-3.5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.25)] transition-transform duration-150 " +
-            (value ? "translate-x-3.5" : "translate-x-0")
-          }
+        <motion.i
+          className="absolute left-0.5 top-0.5 block size-3.5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.25)]"
+          animate={{ x: value ? 14 : 0 }}
+          transition={reduce ? { duration: 0 } : SPRING_SNAPPY}
         />
       </button>
     </div>
