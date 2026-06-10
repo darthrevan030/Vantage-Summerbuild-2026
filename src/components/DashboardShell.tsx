@@ -57,7 +57,7 @@ export function DashboardShell({
       portfolioSeries, portfolioSeriesDaily, fxSeries, fxLabels, fxColors, baseFxRates,
       initialDisplayName, initialBaseCurrency, initialRole,
     }}>
-      <div className="app">
+      <div className="flex min-h-screen flex-col">
         <NerveBar
           hero={hero}
           animate
@@ -69,9 +69,17 @@ export function DashboardShell({
           onMobileClose={() => setMobileNavOpen(false)}
           onTweaksToggle={() => setTweaksOpen((o) => !o)}
         />
-        <div className="body">
+        <div className="flex min-w-0 flex-1 items-start">
           {showSidebar && <SummaryRail />}
-          <main className={"content" + (showSidebar ? "" : " nosb")} key={pathname}>
+          <main
+            className={
+              "min-w-0 flex-1 px-[30px] pb-20 pt-[26px] " +
+              "max-bp900:px-[22px] max-bp900:pb-[60px] max-bp900:pt-5 " +
+              "max-bp768:px-4 max-bp768:pt-4 max-bp600:px-3 max-bp600:pt-3 max-bp380:px-2 max-bp380:pt-2 " +
+              (showSidebar ? "" : "[&>*]:mx-auto [&>*]:max-w-[1600px]")
+            }
+            key={pathname}
+          >
             {children}
           </main>
         </div>

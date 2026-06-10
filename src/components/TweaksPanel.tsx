@@ -58,6 +58,8 @@ export function TweaksPanel({ open, onClose }: { open: boolean; onClose: () => v
   useEffect(() => { applyAccent(tw.accent); }, [tw.accent]);
   useEffect(() => {
     document.documentElement.classList.toggle("light", tw.lightMode);
+    // Sync the default accent to the active theme on toggle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (tw.lightMode && tw.accent === DARK_ACCENT) setTweak("accent", LIGHT_ACCENT);
     if (!tw.lightMode && tw.accent === LIGHT_ACCENT) setTweak("accent", DARK_ACCENT);
   // eslint-disable-next-line react-hooks/exhaustive-deps
