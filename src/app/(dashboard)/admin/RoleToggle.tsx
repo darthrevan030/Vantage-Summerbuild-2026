@@ -1,8 +1,10 @@
 "use client";
 
+import { motion, useReducedMotion } from "motion/react";
 import { useOptimisticValue } from "@/hooks/useOptimisticToggle";
 
 export function RoleToggle({ userId, initialRole }: { userId: string; initialRole: string }) {
+  const reduce = useReducedMotion();
   const { value: role, busy, commit } = useOptimisticValue(
     initialRole,
     (next) =>
@@ -15,17 +17,18 @@ export function RoleToggle({ userId, initialRole }: { userId: string; initialRol
   );
 
   return (
-    <button
+    <motion.button
       className={
         "whitespace-nowrap rounded-full border-none bg-transparent px-[11px] py-1 font-ui text-[11px] font-semibold tracking-[.02em] " +
         (busy ? "cursor-wait " : "cursor-pointer ") +
         (role === "admin" ? "text-gain" : "text-gold")
       }
+      whileTap={reduce ? undefined : { scale: 0.94 }}
       onClick={() => commit(role === "admin" ? "user" : "admin")}
       disabled={busy}
       title={role === "admin" ? "Click to demote to user" : "Click to promote to admin"}
     >
       {busy ? "…" : role}
-    </button>
+    </motion.button>
   );
 }

@@ -68,10 +68,21 @@ function MockInsights() {
 
 const MOCKS = [<MockSignIn key="0" />, <MockAdd key="1" />, <MockInsights key="2" />];
 
-function Layer({ p, index, children }: { p: MotionValue<number>; index: number; children: React.ReactNode }) {
-  const start = index / 3;
-  const opacity = useTransform(p, [start - 0.12, start + 0.04, start + 0.29, start + 0.42], [0, 1, 1, 0]);
-  const y = useTransform(p, [start - 0.12, start + 0.04, start + 0.29, start + 0.42], [40, 0, 0, -40]);
+function Layer({ p, index, count, children }: { p: MotionValue<number>; index: number; count: number; children: React.ReactNode }) {
+  const seg = 1 / count;
+  const s = index * seg;
+  const isFirst = index === 0;
+  const isLast = index === count - 1;
+  // Offsets must stay within [0,1] and be non-decreasing — Motion compiles these
+  // into a WAAPI ScrollTimeline, which rejects out-of-range/unsorted offsets.
+  const inR = [
+    Math.max(0, s - 0.02),
+    Math.min(1, s + 0.04),
+    Math.min(1, s + seg - 0.04),
+    Math.min(1, s + seg + (isLast ? 0 : 0.02)),
+  ];
+  const opacity = useTransform(p, inR, [isFirst ? 1 : 0, 1, 1, isLast ? 1 : 0]);
+  const y = useTransform(p, inR, [isFirst ? 0 : 30, 0, 0, isLast ? 0 : -30]);
   return (
     <motion.div style={{ opacity, y }} className="absolute inset-0 grid place-items-center">
       {children}
@@ -126,7 +137,7 @@ export function HowItWorksScroll() {
             </ol>
           </div>
           <div aria-hidden className="relative h-[340px] max-bp768:hidden">
-            {MOCKS.map((m, i) => <Layer key={i} p={scrollYProgress} index={i}>{m}</Layer>)}
+            {MOCKS.map((m, i) => <Layer key={i} p={scrollYProgress} index={i} count={MOCKS.length}>{m}</Layer>)}
           </div>
         </div>
       </div>

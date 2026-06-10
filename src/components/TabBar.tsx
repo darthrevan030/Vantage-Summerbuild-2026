@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { refreshHoldingPrices } from "@/lib/api-client";
 import { usePortfolio } from "@/context/portfolio";
+import { SPRING_SMOOTH } from "@/components/landing/motion-config";
 
 const TABS = [
   { label: "Overview",     href: "/overview",  icon: "layout-dashboard" },
@@ -22,9 +24,10 @@ const TAB_BASE =
   "relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3.5 py-3.5 font-ui text-[13.5px] font-medium transition-colors duration-[180ms] " +
   "max-bp768:px-2.5 max-bp768:text-[12.5px] max-bp600:px-2 max-bp600:py-[13px] max-bp600:text-[12px] " +
   "max-bp480:px-[7px] max-bp480:py-2.5 max-bp480:text-[11.5px] max-bp380:px-1.5 max-bp380:text-[11px]";
-const TAB_ACTIVE =
-  "text-primary after:absolute after:inset-x-3.5 after:bottom-0 after:h-0.5 after:rounded-t-[2px] after:bg-gold after:shadow-[0_0_12px_var(--accent-glow)] after:content-['']";
+const TAB_ACTIVE = "text-primary";
 const TAB_IDLE = "text-secondary hover:text-primary";
+const UNDERLINE =
+  "absolute inset-x-3.5 bottom-0 h-0.5 rounded-t-[2px] bg-gold shadow-[0_0_12px_var(--accent-glow)]";
 
 const MM_LINK =
   "flex items-center gap-[13px] px-5 py-3.5 font-ui text-sm font-medium transition-[color,background] duration-150";
@@ -43,10 +46,17 @@ interface TabBarProps {
 export function TabBar({ mobileOpen = false, onMobileClose, onTweaksToggle }: TabBarProps) {
   const pathname = usePathname();
   const router   = useRouter();
+  const reduce   = useReducedMotion();
   const { displayName } = usePortfolio();
 
   // Close drawer on route change
   useEffect(() => { onMobileClose?.(); }, [pathname]);
+
+  // Shared sliding underline — only the active tab mounts it; the layoutId
+  // animates it between tabs on navigation (instant under reduced-motion).
+  const underline = (
+    <motion.span layoutId="tab-underline" className={UNDERLINE} transition={reduce ? { duration: 0 } : SPRING_SMOOTH} />
+  );
 
   async function handleLogout() {
     const supabase = createClient();
@@ -81,6 +91,7 @@ export function TabBar({ mobileOpen = false, onMobileClose, onTweaksToggle }: Ta
           >
             <Icon name={icon} size={13} strokeWidth={1.9} />
             {label}
+            {pathname === href && underline}
           </Link>
         ))}
         <div className="flex-1" />
@@ -91,6 +102,7 @@ export function TabBar({ mobileOpen = false, onMobileClose, onTweaksToggle }: Ta
         >
           <Icon name="settings" size={13} strokeWidth={1.9} />
           Settings
+          {pathname === "/settings" && underline}
         </Link>
       </nav>
 

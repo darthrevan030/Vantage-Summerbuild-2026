@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Icon } from "@/components/Icon";
 import { ICON_BTN } from "@/components/TabBar";
-import { useCountUp } from "@/lib/useCountUp";
-import { pct, CCY_SYMBOL } from "@/lib/formatters";
+import { CountUp } from "@/components/landing/CountUp";
+import { pct, CCY_SYMBOL, ccyFmt } from "@/lib/formatters";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { usePortfolio } from "@/context/portfolio";
 import { createClient } from "@/lib/supabase/client";
@@ -21,9 +21,8 @@ interface NerveBarProps {
 }
 
 export function NerveBar({ hero, animate = true, onTweaksToggle, onHamburger }: NerveBarProps) {
-  const { displayName, fmtVal, fmtSigned, baseCurrency, setBaseCurrency } = usePortfolio();
+  const { displayName, fmtSigned, baseCurrency, setBaseCurrency, toBase } = usePortfolio();
   const currencies = useCurrencies();
-  const total = useCountUp(hero.total, 1300, animate);
   const [spin, setSpin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [ccyOpen, setCcyOpen] = useState(false);
@@ -80,7 +79,11 @@ export function NerveBar({ hero, animate = true, onTweaksToggle, onHamburger }: 
         <span className="mt-[3px] font-ui text-[9px] font-medium tracking-[.22em] text-muted max-bp600:hidden">PERSONAL WEALTH TERMINAL</span>
       </div>
       <div className="relative text-center before:pointer-events-none before:absolute before:left-1/2 before:top-1/2 before:h-[120px] before:w-[340px] before:-translate-x-1/2 before:-translate-y-1/2 before:bg-[radial-gradient(60%_70%_at_50%_50%,var(--accent-glow)_0%,transparent_70%)] before:opacity-70 before:blur-[6px] before:content-['']">
-        <div className="relative font-mono text-[28px] font-semibold leading-none tracking-[-.02em] tabular-nums max-bp900:text-[24px] max-bp768:text-[21px] max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px] max-bp380:tracking-[-.01em]">{fmtVal(total)}</div>
+        <div className="relative font-mono text-[28px] font-semibold leading-none tracking-[-.02em] tabular-nums max-bp900:text-[24px] max-bp768:text-[21px] max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px] max-bp380:tracking-[-.01em]">
+          {animate
+            ? <CountUp to={toBase(hero.total)} format={(v) => ccyFmt(v, baseCurrency)} durationMs={900} startOnView={false} />
+            : ccyFmt(toBase(hero.total), baseCurrency)}
+        </div>
         <div className="mt-[3px] flex items-center justify-center gap-[5px] text-xs max-bp768:text-[11px] max-bp600:text-[10.5px] max-bp380:hidden">
           <Icon name={dayUp ? "up" : "down"} size={13} style={{ color: dayUp ? "var(--gain)" : "var(--loss)" }} />
           <span className="font-mono tabular-nums" style={{ color: dayUp ? "var(--gain)" : "var(--loss)" }}>

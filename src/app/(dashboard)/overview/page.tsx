@@ -6,7 +6,8 @@ import { Donut } from "@/components/charts/Donut";
 import { Legend } from "@/components/charts/Legend";
 import { Dumbbell } from "@/components/charts/Dumbbell";
 import { Icon } from "@/components/Icon";
-import { pct } from "@/lib/formatters";
+import { CountUp } from "@/components/landing/CountUp";
+import { pct, ccyFmt, ccySigned } from "@/lib/formatters";
 import { computeMovers, computeCurrencyCards } from "@/lib/portfolio";
 import type { MoverItem } from "@/types/portfolio";
 
@@ -57,7 +58,7 @@ function MoverColumn({ title, list, tone }: { title: string; list: MoverItem[]; 
 }
 
 export default function OverviewPage() {
-  const { hero, holdings, assetAllocation, geoAllocation, fmtVal, fmtSigned } = usePortfolio();
+  const { hero, holdings, assetAllocation, geoAllocation, fmtSigned, toBase, baseCurrency } = usePortfolio();
   const { gainers, losers } = computeMovers(holdings);
   const ccyCards = computeCurrencyCards(holdings);
   const assetGain = hero.totalGain - hero.fxImpact;
@@ -69,22 +70,22 @@ export default function OverviewPage() {
       <div className="grid grid-cols-4 gap-3.5 animate-reveal max-bp1080:grid-cols-2 max-bp480:grid-cols-2">
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-l-2 border-subtle border-l-gold bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-[var(--card-shadow),-14px_0_36px_-28px_var(--accent-glow)] transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9),-16px_0_40px_-26px_var(--accent-glow)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Total Value</span>
-          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]">{fmtVal(hero.total)}</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]"><CountUp to={toBase(hero.total)} format={(v) => ccyFmt(v, baseCurrency)} startOnView={false} /></span>
           <span className="font-ui text-xs text-secondary">Personal wealth</span>
         </div>
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Total Gain</span>
-          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(hero.totalGain)}</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}><CountUp to={toBase(hero.totalGain)} format={(v) => ccySigned(v, baseCurrency)} startOnView={false} /></span>
           <span className="font-mono text-xs tabular-nums" style={{ color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.totalGainPct)}</span>
         </div>
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">FX Impact</span>
-          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>{fmtSigned(hero.fxImpact)}</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}><CountUp to={toBase(hero.fxImpact)} format={(v) => ccySigned(v, baseCurrency)} startOnView={false} /></span>
           <span className="font-mono text-xs tabular-nums" style={{ color: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}>{pct(hero.fxPct)}</span>
         </div>
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">Today</span>
-          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.dayChange >= 0 ? "var(--gain)" : "var(--loss)" }}>{fmtSigned(hero.dayChange)}</span>
+          <span className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]" style={{ color: hero.dayChange >= 0 ? "var(--gain)" : "var(--loss)" }}><CountUp to={toBase(hero.dayChange)} format={(v) => ccySigned(v, baseCurrency)} startOnView={false} /></span>
           <span className="font-mono text-xs tabular-nums" style={{ color: hero.dayChange >= 0 ? "var(--gain)" : "var(--loss)" }}>{pct(hero.dayPct)}</span>
         </div>
       </div>
