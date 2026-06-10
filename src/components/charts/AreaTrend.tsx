@@ -83,7 +83,7 @@ export function AreaTrend({ data, color = "var(--gold)", height = 230, valFmt }:
           const isLast  = k === ticks.length - 1;
           const anchor  = isFirst ? "start" : isLast ? "end" : "middle";
           return (
-            <text key={k} x={X(i)} y={height - 8} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="mono">
+            <text key={k} x={X(i)} y={height - 8} fill="var(--text-muted)" fontSize="10" textAnchor={anchor} className="font-mono">
               {d.label}
             </text>
           );
@@ -97,11 +97,11 @@ export function AreaTrend({ data, color = "var(--gold)", height = 230, valFmt }:
       </svg>
       {hover != null && (
         <div
-          className="chart-tip"
+          className="pointer-events-none absolute z-[5] -translate-x-1/2 rounded-lg border border-gold-soft bg-base px-[11px] py-[7px] shadow-[0_6px_24px_rgba(0,0,0,.5)] light:bg-surface light:shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
           style={{ left: Math.min(Math.max(X(hover), 60), w - 60), top: padT }}
         >
-          <div className="ct-label">{data[hover].label}</div>
-          <div className="ct-val mono">{valFmt ? valFmt(data[hover].v) : data[hover].v}</div>
+          <div className="font-ui text-[10px] uppercase tracking-[.06em] text-muted">{data[hover].label}</div>
+          <div className="mt-0.5 font-mono text-[13px] font-semibold text-gold">{valFmt ? valFmt(data[hover].v) : data[hover].v}</div>
         </div>
       )}
     </div>
