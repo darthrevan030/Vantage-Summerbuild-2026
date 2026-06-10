@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/supabase/guards";
 
 const POS = /\b(surge|beat|record|gain|rise|profit|growth|upgrade|strong|soar|exceed|higher|boost|rally|outperform|rebound)\b/i;
 const NEG = /\b(fall|miss|cut|loss|drop|plunge|downgrade|weak|decline|warn|disappoint|tumble|slide|concern|risk|below|slump)\b/i;
@@ -42,6 +43,9 @@ function toFinnhubNews(raw: string): string {
 }
 
 export async function GET(req: NextRequest) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   const symbol = req.nextUrl.searchParams.get("symbol");
   if (!symbol) return Response.json({ error: "symbol required" }, { status: 400 });
 

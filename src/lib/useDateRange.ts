@@ -65,6 +65,21 @@ export function useDateRange(
     () => ranges.findIndex(([, n]) => n === defaultN)
   );
 
+  // Resync when the data bounds change (e.g. backfill inserts older snapshots,
+  // refresh appends today's) — state initialised from the old labels goes stale.
+  // Render-phase adjustment per https://react.dev/learn/you-might-not-need-an-effect
+  const [prevBounds, setPrevBounds] = useState({ minDate, maxDate });
+  if (prevBounds.minDate !== minDate || prevBounds.maxDate !== maxDate) {
+    setPrevBounds({ minDate, maxDate });
+    if (activePreset >= 0) {
+      setStartDate(calendarStart(ranges[activePreset][1], minDate, maxDate));
+      setEndDate(maxDate);
+    } else {
+      if (startDate < minDate) setStartDate(minDate);
+      if (endDate > maxDate) setEndDate(maxDate);
+    }
+  }
+
   function selectPreset(n: number) {
     const idx = ranges.findIndex(([, pn]) => pn === n);
     setActivePreset(idx >= 0 ? idx : -1);

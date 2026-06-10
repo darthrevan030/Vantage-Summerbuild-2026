@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/supabase/guards";
 
 export async function GET(req: NextRequest) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   const symbol = req.nextUrl.searchParams.get("symbol");
   if (!symbol) return Response.json({ error: "symbol required" }, { status: 400 });
 

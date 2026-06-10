@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
@@ -52,7 +53,7 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await fetch(`/api/holdings?id=${h.id}`, {
+      const res = await fetch(`/api/holdings?id=${h.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,8 +67,15 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           buy_fx_rate: Number(ef.buy_fx_rate),
         }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? "Update failed");
+      }
+      toast.success(`${ef.name} updated`);
       router.refresh();
       onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
     } finally {
       setSaving(false);
     }
@@ -76,9 +84,16 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   async function handleDelete() {
     setSaving(true);
     try {
-      await fetch(`/api/holdings?id=${h.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/holdings?id=${h.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? "Delete failed");
+      }
+      toast.success(`${h.name} removed from portfolio`);
       router.refresh();
       onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setSaving(false);
     }
@@ -276,14 +291,16 @@ export default function HoldingsPage() {
     setRefreshMsg("");
     try {
       const { refreshed, skipped } = await refreshHoldingPrices();
-      setRefreshMsg(
+      const msg =
         refreshed > 0
           ? `Updated ${refreshed} holding${refreshed > 1 ? "s" : ""}${skipped > 0 ? ` · ${skipped} already fresh` : ""}`
-          : "Prices up to date — snapshot recorded"
-      );
+          : "Prices up to date — snapshot recorded";
+      setRefreshMsg(msg);
+      toast.success(msg);
       router.refresh();
     } catch {
       setRefreshMsg("Refresh failed");
+      toast.error("Refresh failed");
     } finally {
       setRefreshing(false);
     }

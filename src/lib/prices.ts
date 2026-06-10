@@ -152,6 +152,8 @@ export async function fetchLivePrices(
         const items: { code: string; close: number }[] = Array.isArray(json) ? json : [json];
         for (const item of items) {
           const ticker = symbolToTicker[item.code];
+          // An unmatched code means the holding silently keeps its stale price
+          if (!ticker) console.warn("[fetchLivePrices] unmatched EODHD code:", item.code);
           if (ticker && item.close) prices[ticker] = item.close;
         }
       } catch {}

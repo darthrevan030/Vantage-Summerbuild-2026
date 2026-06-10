@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createTableListGET } from "@/lib/api/list-route";
 
 export interface CurrencyRow {
   code: string;
@@ -19,17 +18,8 @@ const FALLBACK: CurrencyRow[] = [
   { code: "HKD", label: "Hong Kong Dollar",  active: true, display_order: 8 },
 ];
 
-export async function GET() {
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("currencies")
-      .select("code, label, active, display_order")
-      .order("display_order");
-
-    if (error || !data) return NextResponse.json(FALLBACK);
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json(FALLBACK);
-  }
-}
+export const GET = createTableListGET<CurrencyRow>(
+  "currencies",
+  "code, label, active, display_order",
+  FALLBACK
+);

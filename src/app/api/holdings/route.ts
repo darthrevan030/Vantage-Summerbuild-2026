@@ -1,24 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchHoldings, insertHolding, deleteHolding, updateHolding } from "@/lib/supabase/data";
-import { createClient } from "@/lib/supabase/server";
-
-async function getAuthUser() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
-}
+import { requireAuth } from "@/lib/supabase/guards";
 
 export async function GET() {
-  const user = await getAuthUser();
-  const holdings = await fetchHoldings(user?.id);
+  const { user, error } = await requireAuth();
+  if (error) return error;
+
+  const holdings = await fetchHoldings(user.id);
   return NextResponse.json(holdings);
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { user, error } = await requireAuth();
+  if (error) return error;
 
   const body = await req.json();
   const {
@@ -60,8 +54,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const user = await getAuthUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { user, error } = await requireAuth();
+  if (error) return error;
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -80,10 +74,8 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = await getAuthUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const { user, error } = await requireAuth();
+  if (error) return error;
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");

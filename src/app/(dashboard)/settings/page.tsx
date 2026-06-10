@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { CCY_SYMBOL } from "@/lib/formatters";
@@ -36,9 +37,12 @@ export default function SettingsPage() {
       setDisplayName(nameInput);
       setBaseCurrency(ccyInput);
       setSaveState("saved");
+      toast.success("Preferences saved");
       setTimeout(() => setSaveState("idle"), 2000);
     } else {
       setSaveState("error");
+      const body = await res.json().catch(() => ({}));
+      toast.error((body as { error?: string }).error ?? "Failed to save preferences");
       setTimeout(() => setSaveState("idle"), 3000);
     }
   }

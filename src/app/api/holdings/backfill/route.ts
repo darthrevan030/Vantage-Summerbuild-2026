@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/guards";
 import { fetchHoldings, fetchSnapshots } from "@/lib/supabase/data";
 
 export const maxDuration = 60;
@@ -78,9 +79,8 @@ function fillForward(dates: string[], sparse: Record<string, number>, seed: numb
 }
 
 export async function POST() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { user, error: authError } = await requireAuth();
+  if (authError) return authError;
 
   const holdings = await fetchHoldings(user.id);
   if (holdings.length === 0) return NextResponse.json({ inserted: 0, skipped: 0 });
@@ -179,6 +179,7 @@ export async function POST() {
 
   if (rows.length === 0) return NextResponse.json({ inserted: 0, skipped: existingDates.size });
 
+  const supabase = await createClient();
   const { error } = await supabase
     .from("portfolio_snapshots")
     .upsert(rows, { onConflict: "user_id,recorded_date" });

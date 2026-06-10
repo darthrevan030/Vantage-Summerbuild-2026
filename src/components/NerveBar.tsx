@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "react-toastify";
 import { Icon } from "@/components/Icon";
 import { useCountUp } from "@/lib/useCountUp";
 import { pct, CCY_SYMBOL } from "@/lib/formatters";
@@ -53,11 +54,13 @@ export function NerveBar({ hero, animate = true, onTweaksToggle, onHamburger }: 
   async function switchCurrency(c: string) {
     setBaseCurrency(c);
     setCcyOpen(false);
-    await fetch("/api/settings", {
+    const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ baseCurrency: c }),
     });
+    if (res.ok) toast.success(`Base currency set to ${c}`);
+    else toast.error("Failed to save base currency");
   }
 
   const wordmark = displayName ? `${displayName}'s Portfolio` : "PORTFOLIO";
@@ -126,8 +129,15 @@ export function NerveBar({ hero, animate = true, onTweaksToggle, onHamburger }: 
             onClick={async () => {
               setSpin(true);
               try {
-                await refreshHoldingPrices();
+                const { refreshed } = await refreshHoldingPrices();
+                toast.success(
+                  refreshed > 0
+                    ? `Refreshed ${refreshed} price${refreshed > 1 ? "s" : ""}`
+                    : "Prices already up to date"
+                );
                 router.refresh();
+              } catch {
+                toast.error("Price refresh failed");
               } finally {
                 setSpin(false);
               }

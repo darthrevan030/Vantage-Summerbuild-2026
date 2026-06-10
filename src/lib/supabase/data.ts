@@ -9,8 +9,6 @@ import {
   computeFxGainSGD,
 } from "@/lib/fx";
 
-const DEMO_USER = "demo";
-
 async function makeServerClient() {
   const cookieStore = await cookies();
   return createServerClient(
@@ -98,7 +96,7 @@ function toHoldingRow(db: DbHolding): HoldingRow {
   };
 }
 
-export async function fetchHoldings(userId = DEMO_USER): Promise<HoldingRow[]> {
+export async function fetchHoldings(userId: string): Promise<HoldingRow[]> {
   const supabase = await makeServerClient();
   const { data, error } = await supabase
     .from("holdings")
@@ -169,7 +167,7 @@ export async function updateHoldingPrice(
   await supabase.from("holdings").update(patch).eq("id", id).eq("user_id", userId);
 }
 
-export async function deleteHolding(id: string, userId = DEMO_USER): Promise<void> {
+export async function deleteHolding(id: string, userId: string): Promise<void> {
   const supabase = await makeServerClient();
   // Scope by both id AND user_id — prevents IDOR when multiple users share the table
   await supabase.from("holdings").delete().eq("id", id).eq("user_id", userId);

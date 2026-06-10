@@ -3,8 +3,7 @@ import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { RoleToggle } from "./RoleToggle";
-import { CurrencyToggle } from "./CurrencyToggle";
-import { ExchangeToggle } from "./ExchangeToggle";
+import { ActiveToggle } from "./ActiveToggle";
 import type { CurrencyRow } from "@/app/api/currencies/route";
 import type { ExchangeRow } from "@/app/api/exchanges/route";
 
@@ -254,7 +253,13 @@ export default async function AdminPage() {
         </div>
         <div>
           {(currencyRows ?? []).map((c: CurrencyRow) => (
-            <CurrencyToggle key={c.code} currency={c} />
+            <ActiveToggle
+              key={c.code}
+              code={c.code}
+              label={c.label}
+              initialActive={c.active}
+              endpoint="/api/admin/currencies"
+            />
           ))}
         </div>
       </div>
@@ -269,7 +274,15 @@ export default async function AdminPage() {
         </div>
         <div>
           {(exchangeRows ?? []).map((e: ExchangeRow) => (
-            <ExchangeToggle key={e.code} exchange={e} />
+            <ActiveToggle
+              key={e.code}
+              code={e.code}
+              label={e.label}
+              region={e.region}
+              initialActive={e.active}
+              endpoint="/api/admin/exchanges"
+              codeMinWidth={48}
+            />
           ))}
         </div>
       </div>

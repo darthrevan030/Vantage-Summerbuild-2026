@@ -1,28 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/supabase/guards";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { data: callerSettings } = await supabase
-    .from("user_settings")
-    .select("role")
-    .eq("user_id", user.id)
-    .single();
-
-  if (callerSettings?.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { adminClient, error: authError } = await requireAdmin();
+  if (authError) return authError;
 
   const { id: targetId } = await params;
   const { role } = await req.json();
@@ -31,9 +15,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
 
-  // Prevent removing the last admin
+  // Friendly fast path; the DB trigger is the race-proof backstop.
   if (role === "user") {
-    const { count } = await supabase
+    const { count } = await adminClient
       .from("user_settings")
       .select("*", { count: "exact", head: true })
       .eq("role", "admin");
@@ -46,13 +30,24 @@ export async function PATCH(
     }
   }
 
-  const { error } = await supabase
+  const { data, error } = await adminClient
     .from("user_settings")
     .update({ role })
-    .eq("user_id", targetId);
+    .eq("user_id", targetId)
+    .select("user_id");
 
   if (error) {
+    if (error.message.includes("cannot demote the last admin")) {
+      return NextResponse.json(
+        { error: "Cannot remove the last admin" },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (!data?.length) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   return NextResponse.json({ role });

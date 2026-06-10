@@ -1,26 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { createCachedListHook } from "@/hooks/useCachedList";
 import type { ExchangeRow } from "@/app/api/exchanges/route";
 
 const NONE: ExchangeRow = { code: "", label: "— No exchange (physical / unlisted)", region: "", active: true, display_order: 0 };
 
-let CACHE: ExchangeRow[] | null = null;
-
-export function useExchanges(): ExchangeRow[] {
-  const [exchanges, setExchanges] = useState<ExchangeRow[]>(CACHE ?? [NONE]);
-
-  useEffect(() => {
-    if (CACHE) return;
-    fetch("/api/exchanges")
-      .then((r) => r.json())
-      .then((rows: ExchangeRow[]) => {
-        const active = [NONE, ...rows.filter((e) => e.active)];
-        CACHE = active;
-        setExchanges(active);
-      })
-      .catch(() => {});
-  }, []);
-
-  return exchanges;
-}
+export const useExchanges = createCachedListHook<ExchangeRow, ExchangeRow[]>(
+  "/api/exchanges",
+  [NONE],
+  (rows) => [NONE, ...rows.filter((e) => e.active)]
+);

@@ -37,7 +37,7 @@ export interface Position {
 }
 
 // Tickers that represent unique physical assets (gold, real estate) — never merge these.
-const NON_GROUPABLE = new Set(["—", "-", ""]);
+export const NON_GROUPABLE = new Set(["—", "-", ""]);
 
 const sum = (lots: HoldingRow[], get: (l: HoldingRow) => number) =>
   lots.reduce((s, l) => s + get(l), 0);

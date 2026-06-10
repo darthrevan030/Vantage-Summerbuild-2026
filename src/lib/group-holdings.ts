@@ -1,10 +1,11 @@
 import type { HoldingRow, GroupedHolding } from "@/types/holding";
+import { NON_GROUPABLE } from "@/lib/positions";
 
 export function groupHoldings(rows: HoldingRow[]): GroupedHolding[] {
   const map = new Map<string, HoldingRow[]>();
   for (const row of rows) {
     // untickered assets (Gold, RE) each get their own group; named tickers merge
-    const k = row.ticker !== "—" ? row.ticker : row.id;
+    const k = NON_GROUPABLE.has(row.ticker) ? row.id : row.ticker;
     const bucket = map.get(k) ?? [];
     bucket.push(row);
     map.set(k, bucket);

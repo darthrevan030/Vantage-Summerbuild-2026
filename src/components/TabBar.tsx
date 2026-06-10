@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { toast } from "react-toastify";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { refreshHoldingPrices } from "@/lib/api-client";
@@ -38,9 +39,16 @@ export function TabBar({ mobileOpen = false, onMobileClose }: TabBarProps) {
 
   async function handleRefresh() {
     try {
-      await refreshHoldingPrices();
+      const { refreshed } = await refreshHoldingPrices();
+      toast.success(
+        refreshed > 0
+          ? `Refreshed ${refreshed} price${refreshed > 1 ? "s" : ""}`
+          : "Prices already up to date"
+      );
       router.refresh();
-    } catch { /* silent */ }
+    } catch {
+      toast.error("Price refresh failed");
+    }
     onMobileClose?.();
   }
 

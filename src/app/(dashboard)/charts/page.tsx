@@ -9,7 +9,7 @@ import { FXArea } from "@/components/charts/FXArea";
 import { pct } from "@/lib/formatters";
 import { useDateRange, RANGES_DAILY } from "@/lib/useDateRange";
 import { useRouter } from "next/navigation";
-import { useToast } from "@/components/Toast";
+import { toast } from "react-toastify";
 
 function RangeBar({
   ranges,
@@ -50,7 +50,6 @@ function RangeBar({
 function PortfolioTrend() {
   const { portfolioSeriesDaily, fmtVal, fmtSigned } = usePortfolio();
   const router = useRouter();
-  const { toast } = useToast();
   const [backfilling, setBackfilling] = useState(false);
 
   const handleBackfill = async () => {
@@ -59,10 +58,10 @@ function PortfolioTrend() {
       const r = await fetch("/api/holdings/backfill", { method: "POST" });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "Backfill failed");
-      toast(`Loaded ${j.inserted} historical snapshot${j.inserted !== 1 ? "s" : ""}`);
+      toast.success(`Loaded ${j.inserted} historical snapshot${j.inserted !== 1 ? "s" : ""}`);
       router.refresh();
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Backfill failed", "error");
+      toast.error(e instanceof Error ? e.message : "Backfill failed");
     } finally {
       setBackfilling(false);
     }
@@ -70,8 +69,7 @@ function PortfolioTrend() {
 
   const seriesLabels = useMemo(
     () => portfolioSeriesDaily.map((p) => p.date),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [portfolioSeriesDaily.length]
+    [portfolioSeriesDaily]
   );
 
   const {

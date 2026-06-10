@@ -1,13 +1,23 @@
 import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/supabase/guards";
 
 const REVALIDATE_SECONDS = 3600;
+const CCY_RE = /^[A-Z]{3}$/;
 
 export async function GET(req: NextRequest) {
+  const { error } = await requireAuth();
+  if (error) return error;
+
   const ccy = req.nextUrl.searchParams.get("ccy")?.toUpperCase();
   const base = (req.nextUrl.searchParams.get("base") ?? "SGD").toUpperCase();
   const days = Math.min(parseInt(req.nextUrl.searchParams.get("days") ?? "30"), 90);
 
-  if (!ccy) return Response.json({ error: "ccy required" }, { status: 400 });
+  if (!ccy || !CCY_RE.test(ccy)) {
+    return Response.json({ error: "invalid ccy" }, { status: 400 });
+  }
+  if (!CCY_RE.test(base)) {
+    return Response.json({ error: "invalid base currency" }, { status: 400 });
+  }
 
   const key = process.env.FINNHUB_API_KEY;
   // Soft fail — FX sparklines are an enhancement, not critical

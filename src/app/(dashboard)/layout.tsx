@@ -22,7 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: { user } } = await supabase.auth.getUser();
 
   const [holdings, userSettings, snapshots] = await Promise.all([
-    fetchHoldings(user?.id),
+    user ? fetchHoldings(user.id) : Promise.resolve([]),
     user ? fetchUserSettings(user.id) : Promise.resolve({ displayName: "", baseCurrency: "SGD", role: "user" }),
     user ? fetchSnapshots(user.id) : Promise.resolve([]),
   ]);

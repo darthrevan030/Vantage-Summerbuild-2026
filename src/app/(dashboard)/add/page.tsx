@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
 import { fetchFx } from "@/lib/api-client";
-import { useToast } from "@/components/Toast";
+import { toast } from "react-toastify";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 
@@ -74,7 +74,6 @@ const EMPTY_FORM = {
 // ---- manual entry form ----
 function ManualForm() {
   const router = useRouter();
-  const { toast } = useToast();
   const currencies = useCurrencies();
   const exchanges  = useExchanges();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -165,14 +164,14 @@ function ManualForm() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? "Save failed"); }
-      toast(`${form.name.trim()} added to portfolio`);
+      toast.success(`${form.name.trim()} added to portfolio`);
       setForm(EMPTY_FORM);
       setFxAuto(false);
       router.refresh();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Save failed";
       setError(msg);
-      toast(msg, "error");
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -331,8 +330,11 @@ function ImportPanel() {
         if (res.ok) ok++; else fail++;
       } catch { fail++; }
     }
-    setResult(`Imported ${ok} holding${ok !== 1 ? "s" : ""}${fail > 0 ? ` · ${fail} failed` : ""}.`);
+    const summary = `Imported ${ok} holding${ok !== 1 ? "s" : ""}${fail > 0 ? ` · ${fail} failed` : ""}.`;
+    setResult(summary);
     setImporting(false);
+    if (fail > 0) toast.error(summary);
+    else if (ok > 0) toast.success(summary);
     if (ok > 0) router.refresh();
   };
 

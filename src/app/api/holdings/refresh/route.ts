@@ -1,12 +1,6 @@
 import { fetchHoldings, updateHoldingPrice, recordSnapshot } from "@/lib/supabase/data";
 import { fetchLivePrices, fetchLiveFxRates, fetchCryptoSparks, fetchEquitySparks } from "@/lib/prices";
-import { createClient } from "@/lib/supabase/server";
-
-async function getAuthUser() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
-}
+import { requireAuth } from "@/lib/supabase/guards";
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -16,8 +10,8 @@ function isStale(priceRefreshedAt: string | null): boolean {
 }
 
 export async function POST() {
-  const user = await getAuthUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const { user, error } = await requireAuth();
+  if (error) return error;
 
   const holdings = await fetchHoldings(user.id);
   const stale = holdings.filter((h) => isStale(h.priceRefreshedAt));

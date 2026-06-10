@@ -7,7 +7,7 @@ import { TabBar } from "@/components/TabBar";
 import { SummaryRail } from "@/components/SummaryRail";
 import { TweaksPanel } from "@/components/TweaksPanel";
 import { PortfolioProvider } from "@/context/portfolio";
-import { ToastProvider } from "@/components/Toast";
+import { ToastContainer } from "react-toastify";
 import type { HoldingRow } from "@/types/holding";
 import type {
   HeroStats,
@@ -58,24 +58,23 @@ export function DashboardShell({
       portfolioSeries, portfolioSeriesDaily, fxSeries, fxLabels, fxColors, baseFxRates,
       initialDisplayName, initialBaseCurrency, initialRole,
     }}>
-      <ToastProvider>
-        <div className="app">
-          <NerveBar
-            hero={hero}
-            animate
-            onTweaksToggle={() => setTweaksOpen((o) => !o)}
-            onHamburger={() => setMobileNavOpen(true)}
-          />
-          <TabBar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
-          <div className="body">
-            {showSidebar && <SummaryRail />}
-            <main className={"content" + (showSidebar ? "" : " nosb")} key={pathname}>
-              {children}
-            </main>
-          </div>
-          <TweaksPanel open={tweaksOpen} onClose={() => setTweaksOpen(false)} />
+      <div className="app">
+        <NerveBar
+          hero={hero}
+          animate
+          onTweaksToggle={() => setTweaksOpen((o) => !o)}
+          onHamburger={() => setMobileNavOpen(true)}
+        />
+        <TabBar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        <div className="body">
+          {showSidebar && <SummaryRail />}
+          <main className={"content" + (showSidebar ? "" : " nosb")} key={pathname}>
+            {children}
+          </main>
         </div>
-      </ToastProvider>
+        <TweaksPanel open={tweaksOpen} onClose={() => setTweaksOpen(false)} />
+        <ToastContainer position="bottom-right" autoClose={3500} theme="dark" newestOnTop />
+      </div>
     </PortfolioProvider>
   );
 }

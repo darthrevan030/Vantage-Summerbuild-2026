@@ -1,9 +1,26 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { requireAuth } from "@/lib/supabase/guards";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const MAX_PROMPT_LENGTH = 4000;
+
 export async function POST(req: Request) {
-  const { prompt }: { prompt: string } = await req.json();
+  const { error } = await requireAuth();
+  if (error) return error;
+
+  const body = await req.json().catch(() => null);
+  const prompt = body?.prompt;
+
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    return Response.json({ error: "prompt required" }, { status: 400 });
+  }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return Response.json(
+      { error: `prompt must be at most ${MAX_PROMPT_LENGTH} characters` },
+      { status: 400 }
+    );
+  }
 
   const encoder = new TextEncoder();
 
