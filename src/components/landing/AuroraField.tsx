@@ -128,7 +128,7 @@ export function AuroraField() {
       const sx = pointer.x * W, sy = pointer.y * H;
       const [gr, gg, gb] = palette.gold;
       const sg = ctx!.createRadialGradient(sx, sy, 0, sx, sy, Math.max(W, H) * 0.26);
-      sg.addColorStop(0, `rgba(${gr},${gg},${gb},${pointer.active ? 0.055 : 0.03})`);
+      sg.addColorStop(0, `rgba(${gr},${gg},${gb},${pointer.active ? 0.2 : 0.05})`);
       sg.addColorStop(1, `rgba(${gr},${gg},${gb},0)`);
       ctx!.globalCompositeOperation = "lighter";
       ctx!.fillStyle = sg;
