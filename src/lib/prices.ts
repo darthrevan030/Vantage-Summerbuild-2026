@@ -95,7 +95,7 @@ function toEohdSymbol(ticker: string, currency: string): string {
  * Returns the Yahoo Finance symbol for a ticker.
  * US stocks: bare ticker (no suffix). All others: ticker + exchange suffix.
  */
-function toYahooSymbol(ticker: string, currency: string): string {
+export function toYahooSymbol(ticker: string, currency: string): string {
   if (ticker.includes(".")) {
     const dot = ticker.lastIndexOf(".");
     const sym = ticker.slice(0, dot);

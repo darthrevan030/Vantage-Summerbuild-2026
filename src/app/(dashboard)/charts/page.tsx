@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { usePortfolio } from "@/context/portfolio";
 import { Donut } from "@/components/charts/Donut";
 import { Legend } from "@/components/charts/Legend";
 import { AreaTrend } from "@/components/charts/AreaTrend";
 import { FXArea } from "@/components/charts/FXArea";
-import { pct } from "@/lib/formatters";
+import { pct, ccySigned } from "@/lib/formatters";
+import type { FxSeriesPoint } from "@/types/portfolio";
 import { useDateRange, RANGES_DAILY } from "@/lib/useDateRange";
+import { InfoTip } from "@/components/InfoTip";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -101,35 +103,19 @@ function PortfolioTrend() {
     const si = seriesLabels.findIndex((l) => l >= startDate);
     const ei = [...seriesLabels].reverse().findIndex((l) => l <= endCmp);
     const eiActual = ei < 0 ? -1 : seriesLabels.length - 1 - ei;
-    if (si < 0 || eiActual < 0 || si > eiActual) return portfolioSeriesDaily;
-    const slice = portfolioSeriesDaily.slice(si, eiActual + 1);
-    if (slice.length < 2) return portfolioSeriesDaily;
-    return slice;
+    // Strict in-range slice. We deliberately do NOT widen it when it's short:
+    // showing a 4-day span under a "1D" label would misrepresent the data, so
+    // an under-filled range falls through to an honest "not enough data" note.
+    if (si < 0 || eiActual < 0 || si > eiActual) return [];
+    return portfolioSeriesDaily.slice(si, eiActual + 1);
   }, [portfolioSeriesDaily, seriesLabels, startDate, endDate]);
 
-  const first = data[0];
-  const last = data[data.length - 1];
-  if (!first || !last)
-    return (
-      <div
-        className="card flex flex-col min-h-[300px] px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp600:min-h-0 max-bp480:p-3.5 max-bp380:p-3"
-        style={{ animationDelay: ".04s" }}
-      >
-        <div className="flex items-baseline justify-between mb-4">
-          <span className="text-[13px] font-semibold text-primary tracking-[.01em]">
-            Portfolio Value Over Time
-          </span>
-        </div>
-        <div
-          className="font-ui text-secondary"
-          style={{ padding: "32px 0", textAlign: "center" }}
-        >
-          Add holdings to see portfolio value over time.
-        </div>
-      </div>
-    );
-  const chg = last.v - first.v;
-  const chgPct = first.v > 0 ? (chg / first.v) * 100 : 0;
+  const hasData = portfolioSeriesDaily.length > 0;
+  const enough = data.length >= 2;
+  const first = enough ? data[0] : undefined;
+  const last = enough ? data[data.length - 1] : undefined;
+  const chg = enough ? last!.v - first!.v : 0;
+  const chgPct = enough && first!.v > 0 ? (chg / first!.v) * 100 : 0;
   const pos = chg >= 0;
 
   return (
@@ -142,20 +128,26 @@ function PortfolioTrend() {
           Portfolio Value Over Time
         </span>
         {(() => {
+          // Always available: backfill now does a FULL rebuild, recomputing every
+          // date from the current holdings, so back-dated lots land on their real
+          // trade date. The label just hints at the most useful framing.
           const today = new Date().toISOString().slice(0, 10);
           const latest =
             portfolioSeriesDaily[portfolioSeriesDaily.length - 1]?.date ?? "";
-          const needsSync = portfolioSeriesDaily.length < 30 || latest < today;
-          if (!needsSync) return null;
           const label =
-            portfolioSeriesDaily.length < 30 ? "Load history" : "Sync to today";
+            portfolioSeriesDaily.length < 30
+              ? "Load history"
+              : latest < today
+                ? "Sync to today"
+                : "Rebuild history";
           return (
             <button
               className="flex items-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle bg-surface px-2.5 py-1.5 font-ui text-[11.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50"
               onClick={handleBackfill}
               disabled={backfilling}
+              title="Recompute all historical snapshots from your current holdings"
             >
-              {backfilling ? "Loading…" : label}
+              {backfilling ? "Rebuilding…" : label}
             </button>
           );
         })()}
@@ -200,24 +192,43 @@ function PortfolioTrend() {
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between mt-[-6px] mb-2 max-bp600:flex-col max-bp600:items-start max-bp600:gap-0.5">
-        <span className="font-ui text-secondary text-[11px] tracking-[.04em]">
-          {first.label} – {last.label}
-        </span>
-        <span
-          className="font-mono text-[11px] tracking-[.04em]"
-          style={{ color: pos ? "var(--gain)" : "var(--loss)" }}
+      {!hasData ? (
+        <div
+          className="font-ui text-secondary"
+          style={{ padding: "32px 0", textAlign: "center" }}
         >
-          {fmtSigned(chg)} ({pct(chgPct)})
-        </span>
-      </div>
-      <AreaTrend
-        key={startDate + endDate}
-        data={data}
-        color="var(--gold)"
-        height={220}
-        valFmt={(v) => fmtVal(v)}
-      />
+          Add holdings to see portfolio value over time.
+        </div>
+      ) : !enough ? (
+        <div
+          className="font-ui text-secondary"
+          style={{ padding: "32px 0", textAlign: "center" }}
+        >
+          Not enough recorded data in this range. Pick a wider range, or sync to
+          capture today&rsquo;s value.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mt-[-6px] mb-2 max-bp600:flex-col max-bp600:items-start max-bp600:gap-0.5">
+            <span className="font-ui text-secondary text-[11px] tracking-[.04em]">
+              {first!.label} – {last!.label}
+            </span>
+            <span
+              className="font-mono text-[11px] tracking-[.04em]"
+              style={{ color: pos ? "var(--gain)" : "var(--loss)" }}
+            >
+              {fmtSigned(chg)} ({pct(chgPct)})
+            </span>
+          </div>
+          <AreaTrend
+            key={startDate + endDate}
+            data={data}
+            color="var(--gold)"
+            height={220}
+            valFmt={(v) => fmtVal(v)}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -264,9 +275,63 @@ function PerfBars() {
   );
 }
 
+const FX_PALETTE = [
+  "#6fb0ff",
+  "#46d8a0",
+  "#f0bd8a",
+  "#b79cff",
+  "#f4a6cf",
+  "#8b8bff",
+];
+
 function FXImpactCard() {
   const { fxSeries, fxColors, fxLabels, baseCurrency, fmtSigned } =
     usePortfolio();
+
+  // FX impact relative to SGD only rescales when the base changes (same shape).
+  // For a non-SGD base it must be RECOMPUTED — fetch the base-relative series.
+  const [baseSeries, setBaseSeries] = useState<{
+    series: FxSeriesPoint[];
+    labels: string[];
+    keys: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (baseCurrency === "SGD") {
+      setBaseSeries(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/portfolio/fx-series?base=${baseCurrency}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled)
+          setBaseSeries(
+            Array.isArray(d?.series) ? d : { series: [], labels: [], keys: [] },
+          );
+      })
+      .catch(() => {
+        if (!cancelled) setBaseSeries({ series: [], labels: [], keys: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseCurrency]);
+
+  const useBase = baseCurrency !== "SGD" && baseSeries != null;
+  const series = useBase ? baseSeries!.series : fxSeries;
+  const labels = useBase ? baseSeries!.labels : fxLabels;
+  const colors = useMemo(() => {
+    if (!useBase) return fxColors;
+    const c: Record<string, string> = {};
+    baseSeries!.keys.forEach((k, i) => (c[k] = FX_PALETTE[i % FX_PALETTE.length]));
+    return c;
+  }, [useBase, fxColors, baseSeries]);
+  // The base-relative series is already in the base currency, so format it
+  // directly; the SGD series still needs SGD→base conversion via fmtSigned.
+  const valFmt = useBase
+    ? (v: number) => ccySigned(v, baseCurrency)
+    : fmtSigned;
 
   const {
     startDate,
@@ -277,24 +342,25 @@ function FXImpactCard() {
     handleStartChange,
     handleEndChange,
     toggleCustom,
-  } = useDateRange(fxLabels, RANGES_DAILY);
+  } = useDateRange(labels, RANGES_DAILY);
 
-  const fxKeys = Object.keys(fxColors);
+  const fxKeys = Object.keys(colors);
 
   const { filteredSeries, filteredLabels } = useMemo(() => {
     // Normalise a YYYY-MM endDate to end-of-month so it includes all daily points in that month
     const endCmp = endDate.length === 7 ? endDate + "-31" : endDate;
-    const si = fxLabels.findIndex((l) => l >= startDate);
-    const eiRev = [...fxLabels].reverse().findIndex((l) => l <= endCmp);
-    const ei = eiRev < 0 ? -1 : fxLabels.length - 1 - eiRev;
+    const si = labels.findIndex((l) => l >= startDate);
+    const eiRev = [...labels].reverse().findIndex((l) => l <= endCmp);
+    const ei = eiRev < 0 ? -1 : labels.length - 1 - eiRev;
+    // Strict in-range slice; an under-filled short range falls through to the
+    // "not enough data" note rather than misrepresenting a wider span.
     if (si < 0 || ei < 0 || si > ei)
-      return { filteredSeries: fxSeries, filteredLabels: fxLabels };
-    const slicedSeries = fxSeries.slice(si, ei + 1);
-    const slicedLabels = fxLabels.slice(si, ei + 1);
-    if (slicedSeries.length < 2)
-      return { filteredSeries: fxSeries, filteredLabels: fxLabels };
-    return { filteredSeries: slicedSeries, filteredLabels: slicedLabels };
-  }, [fxSeries, fxLabels, startDate, endDate]);
+      return { filteredSeries: [], filteredLabels: [] };
+    return {
+      filteredSeries: series.slice(si, ei + 1),
+      filteredLabels: labels.slice(si, ei + 1),
+    };
+  }, [series, labels, startDate, endDate]);
 
   return (
     <div
@@ -304,7 +370,10 @@ function FXImpactCard() {
       <div className="flex items-baseline justify-between mb-4">
         <div>
           <span className="text-[13px] font-semibold text-primary tracking-[.01em]">
-            FX Impact Over Time
+            FX Impact Over Time{" "}
+            <InfoTip
+              text={`A flat line means you held no foreign-currency assets in that period, so exchange-rate moves had no effect. Values are shown in ${baseCurrency}; the line only moves once you hold positions in a currency other than SGD.`}
+            />
           </span>
           <span
             className="font-ui text-secondary text-[11px] tracking-[.04em]"
@@ -315,7 +384,7 @@ function FXImpactCard() {
         </div>
       </div>
 
-      {fxSeries.length > 0 ? (
+      {series.length > 0 ? (
         <>
           <RangeBar
             ranges={RANGES_DAILY}
@@ -357,29 +426,41 @@ function FXImpactCard() {
               </button>
             </div>
           )}
-          <FXArea
-            key={startDate + endDate}
-            data={filteredSeries}
-            colors={fxColors}
-            keys={fxKeys}
-            labels={filteredLabels}
-            height={210}
-            valFmt={fmtSigned}
-          />
-          <div className="flex gap-[18px] justify-center mt-2.5">
-            {fxKeys.map((k) => (
-              <span
-                key={k}
-                className="flex items-center gap-1.5 text-xs text-secondary"
-              >
-                <i
-                  className="size-[9px] rounded-[2px]"
-                  style={{ background: fxColors[k] }}
-                />
-                <span className="font-ui">{k.toUpperCase()}</span>
-              </span>
-            ))}
-          </div>
+          {filteredSeries.length >= 2 ? (
+            <>
+              <FXArea
+                key={startDate + endDate}
+                data={filteredSeries}
+                colors={colors}
+                keys={fxKeys}
+                labels={filteredLabels}
+                height={210}
+                valFmt={valFmt}
+              />
+              <div className="flex gap-[18px] justify-center mt-2.5">
+                {fxKeys.map((k) => (
+                  <span
+                    key={k}
+                    className="flex items-center gap-1.5 text-xs text-secondary"
+                  >
+                    <i
+                      className="size-[9px] rounded-[2px]"
+                      style={{ background: colors[k] }}
+                    />
+                    <span className="font-ui">{k.toUpperCase()}</span>
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div
+              className="font-ui text-secondary"
+              style={{ padding: "32px 0", textAlign: "center" }}
+            >
+              Not enough recorded data in this range. Pick a wider range, or sync
+              to capture today&rsquo;s value.
+            </div>
+          )}
         </>
       ) : (
         <div

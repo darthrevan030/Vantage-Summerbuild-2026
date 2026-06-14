@@ -84,12 +84,10 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [editForm, setEditForm] = useState({
     name: h.name,
-    ticker: h.ticker,
-    asset_type: h.assetType,
     strategy: h.strategy,
+    source: h.source ?? "",
     units: String(h.units),
-    current_price: String(h.currentPrice),
-    current_fx_rate: String(h.currentFxRate),
+    fees: String(h.fees ?? 0),
     buy_price: String(h.buyPrice),
     buy_date: h.buyDate,
     buy_fx_rate: String(h.buyFxRate),
@@ -106,12 +104,10 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: ef.name,
-          ticker: ef.ticker,
-          asset_type: ef.asset_type,
           strategy: ef.strategy,
+          source: ef.source,
           units: Number(ef.units),
-          current_price: Number(ef.current_price),
-          current_fx_rate: Number(ef.current_fx_rate),
+          fees: Number(ef.fees),
           buy_price: Number(ef.buy_price),
           buy_date: ef.buy_date,
           buy_fx_rate: Number(ef.buy_fx_rate),
@@ -183,22 +179,23 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Ticker
+              Fund Source
             </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              value={ef.ticker}
-              onChange={(e) => setEf("ticker", e.target.value.toUpperCase())}
+            <Select
+              value={ef.source || "None"}
+              options={["None", "Cash", "CPF", "SRS"]}
+              onChange={(v) => setEf("source", v === "None" ? "" : v)}
             />
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Asset Type
+              Fees
             </span>
-            <Select
-              value={ef.asset_type}
-              options={ASSET_TYPES_EDIT}
-              onChange={(v) => setEf("asset_type", v)}
+            <input
+              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+              type="number"
+              value={ef.fees}
+              onChange={(e) => setEf("fees", e.target.value)}
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -260,28 +257,6 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
               type="number"
               value={ef.buy_fx_rate}
               onChange={(e) => setEf("buy_fx_rate", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Current Price
-            </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              type="number"
-              value={ef.current_price}
-              onChange={(e) => setEf("current_price", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Current FX Rate
-            </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              type="number"
-              value={ef.current_fx_rate}
-              onChange={(e) => setEf("current_fx_rate", e.target.value)}
             />
           </div>
         </div>

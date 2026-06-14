@@ -59,7 +59,7 @@ export function Select({ value, options, onChange }: SelectProps) {
       {open && (
         <div
           ref={dropRef}
-          className="fixed z-[9999] overflow-hidden rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
+          className="fixed z-[9999] max-h-60 overflow-y-auto rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
           style={dropStyle}
         >
           {options.map((o) => (

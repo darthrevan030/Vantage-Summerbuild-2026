@@ -9,9 +9,19 @@ import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 
-const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE"];
+const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
 
 const PHYSICAL_TYPES = new Set(["Gold", "RE"]);
+const FIXED_INCOME_TYPES = new Set(["Bond", "T-Bill"]);
+
+// Fund-source options (maps the human label ↔ the value the API expects)
+const SOURCE_LABEL: Record<string, string> = {
+  "": "— None",
+  Cash: "Cash",
+  CPF: "CPF",
+  SRS: "SRS",
+};
+const TXN_LABEL: Record<string, string> = { buy: "Buy", sell: "Sell" };
 
 const STRAT_LABEL: Record<string, string> = {
   long_term: "Long Term",
@@ -37,6 +47,8 @@ const TYPE_ICON: Record<string, string> = {
   REIT: "landmark",
   Gold: "gem",
   RE: "building",
+  Bond: "landmark",
+  "T-Bill": "landmark",
 };
 
 // ---- reusable field primitive ----
@@ -115,6 +127,15 @@ const EMPTY_FORM = {
   buy_date: TODAY,
   buy_fx_rate: "",
   notes: "",
+  // SGX / lot fields
+  transaction_type: "buy",
+  source: "",
+  fees: "",
+  dividend_yield: "",
+  // Fixed-income (Bond / T-Bill) fields
+  maturity_date: "",
+  par_value: "",
+  coupon_rate: "",
 };
 
 // ---- manual entry form ----
@@ -217,6 +238,8 @@ function ManualForm() {
           : baseTicker;
 
       const fxRate = parseFloat(form.buy_fx_rate || "1") || 1;
+      const isFixedIncome = FIXED_INCOME_TYPES.has(form.asset_type);
+      const num = (v: string) => (v.trim() === "" ? null : parseFloat(v));
       const payload = {
         ticker: tickerWithExchange,
         name: form.name.trim(),
@@ -234,6 +257,15 @@ function ManualForm() {
         current_fx_rate: fxRate,
         spark_data: [buy_price],
         notes: form.notes || null,
+        // Lot fields
+        transaction_type: form.transaction_type,
+        source: form.source,
+        fees: num(form.fees) ?? 0,
+        dividend_yield: num(form.dividend_yield),
+        // Fixed-income instrument fields (only sent for Bond / T-Bill)
+        maturity_date: isFixedIncome ? form.maturity_date || null : null,
+        par_value: isFixedIncome ? num(form.par_value) : null,
+        coupon_rate: isFixedIncome ? num(form.coupon_rate) : null,
       };
       const res = await fetch("/api/holdings", {
         method: "POST",
@@ -416,6 +448,84 @@ function ManualForm() {
             </button>
           </div>
         </Field>
+        <Field label="Transaction">
+          <Select
+            value={TXN_LABEL[form.transaction_type]}
+            options={Object.values(TXN_LABEL)}
+            onChange={(v) => set("transaction_type", v === "Sell" ? "sell" : "buy")}
+          />
+        </Field>
+        <Field label="Fund Source">
+          <Select
+            value={SOURCE_LABEL[form.source]}
+            options={Object.values(SOURCE_LABEL)}
+            onChange={(v) =>
+              set(
+                "source",
+                Object.entries(SOURCE_LABEL).find(([, lbl]) => lbl === v)?.[0] ??
+                  "",
+              )
+            }
+          />
+        </Field>
+        <Field label="Fees">
+          <input
+            className="inp"
+            type="number"
+            placeholder="0"
+            min="0"
+            step="any"
+            value={form.fees}
+            onChange={(e) => set("fees", e.target.value)}
+          />
+        </Field>
+        <Field label="Dividend Yield % (optional)">
+          <input
+            className="inp"
+            type="number"
+            placeholder="auto"
+            min="0"
+            step="any"
+            value={form.dividend_yield}
+            onChange={(e) => set("dividend_yield", e.target.value)}
+          />
+        </Field>
+
+        {FIXED_INCOME_TYPES.has(form.asset_type) && (
+          <>
+            <Field label="Maturity Date">
+              <input
+                className="inp"
+                type="date"
+                value={form.maturity_date}
+                onChange={(e) => set("maturity_date", e.target.value)}
+              />
+            </Field>
+            <Field label="Par Value">
+              <input
+                className="inp"
+                type="number"
+                placeholder="100"
+                min="0"
+                step="any"
+                value={form.par_value}
+                onChange={(e) => set("par_value", e.target.value)}
+              />
+            </Field>
+            <Field label="Coupon Rate %">
+              <input
+                className="inp"
+                type="number"
+                placeholder="3.5"
+                min="0"
+                step="any"
+                value={form.coupon_rate}
+                onChange={(e) => set("coupon_rate", e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+
         <Field label="Notes" full>
           <input
             className="inp"

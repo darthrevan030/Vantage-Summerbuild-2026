@@ -1,6 +1,7 @@
 import {
   fetchHoldings,
-  updateHoldingPrice,
+  upsertTickerQuote,
+  updateFxRate,
   recordSnapshot,
 } from "@/lib/supabase/data";
 import {
@@ -28,21 +29,30 @@ export async function POST() {
   if (limited) return limited;
 
   const holdings = await fetchHoldings(user.id);
-  const stale = holdings.filter((h) => isStale(h.priceRefreshedAt));
 
-  if (stale.length === 0) {
+  // Dedupe to one entry per symbol — quotes are now shared across lots/users,
+  // so a symbol is refreshed once regardless of how many lots reference it.
+  const bySymbol = new Map<string, (typeof holdings)[number]>();
+  for (const h of holdings) {
+    if (h.ticker !== "—" && !bySymbol.has(h.ticker)) bySymbol.set(h.ticker, h);
+  }
+  const symbols = [...bySymbol.values()];
+  const staleSymbols = symbols.filter((h) => isStale(h.priceRefreshedAt));
+
+  if (staleSymbols.length === 0) {
     // Prices still fresh — but always snapshot so the charts have today's data point
     await recordSnapshot(user.id, holdings);
-    return Response.json({ refreshed: 0, skipped: holdings.length });
+    return Response.json({ refreshed: 0, skipped: symbols.length });
   }
 
-  // Unique non-placeholder tickers + their currencies for exchange resolution
-  const tickers = [
-    ...new Set(stale.map((h) => h.ticker).filter((t) => t !== "—")),
-  ];
+  const tickers = staleSymbols.map((h) => h.ticker);
   const tickerCurrency = Object.fromEntries(
-    stale.filter((h) => h.ticker !== "—").map((h) => [h.ticker, h.currency]),
+    staleSymbols.map((h) => [h.ticker, h.currency]),
   );
+  // Currencies whose FX rate we should refresh (non-SGD, across all holdings)
+  const currencies = [
+    ...new Set(holdings.map((h) => h.currency).filter((c) => c !== "SGD")),
+  ];
 
   const providers = await getProviderFlags();
 
@@ -60,21 +70,26 @@ export async function POST() {
         : Promise.resolve({} as Record<string, number[]>),
     ]);
 
+  // 1. Update the shared price cache — one write per symbol
   await Promise.all(
-    stale.map((h) => {
+    staleSymbols.map((h) => {
       const priceResult = livePrices[h.ticker];
       const newPrice = priceResult?.price;
-      const newFx    = h.currency === "SGD" ? 1 : liveFxRates[h.currency];
       const sparkData = cryptoSparks[h.ticker] ?? equitySparks[h.ticker];
-      return updateHoldingPrice(
-        h.id,
-        newPrice && newPrice > 0 ? newPrice : h.currentPrice,
-        newFx && newFx > 0 ? newFx : h.currentFxRate,
-        user.id,
+      return upsertTickerQuote(h.ticker, {
+        currentPrice: newPrice && newPrice > 0 ? newPrice : h.currentPrice,
+        prevPrice: priceResult?.prevPrice,
+        prevPriceSource: priceResult?.prevPriceSource,
         sparkData,
-        priceResult?.prevPrice,
-        priceResult?.prevPriceSource,
-      );
+      });
+    }),
+  );
+
+  // 2. Update FX rates — one write per non-SGD currency
+  await Promise.all(
+    currencies.map((ccy) => {
+      const rate = liveFxRates[ccy];
+      return rate && rate > 0 ? updateFxRate(ccy, rate) : Promise.resolve();
     }),
   );
 
@@ -83,7 +98,7 @@ export async function POST() {
   await recordSnapshot(user.id, fresh);
 
   return Response.json({
-    refreshed: stale.length,
-    skipped: holdings.length - stale.length,
+    refreshed: staleSymbols.length,
+    skipped: symbols.length - staleSymbols.length,
   });
 }
