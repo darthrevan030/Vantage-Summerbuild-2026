@@ -62,8 +62,9 @@ export async function POST() {
 
   await Promise.all(
     stale.map((h) => {
-      const newPrice = livePrices[h.ticker];
-      const newFx = h.currency === "SGD" ? 1 : liveFxRates[h.currency];
+      const priceResult = livePrices[h.ticker];
+      const newPrice = priceResult?.price;
+      const newFx    = h.currency === "SGD" ? 1 : liveFxRates[h.currency];
       const sparkData = cryptoSparks[h.ticker] ?? equitySparks[h.ticker];
       return updateHoldingPrice(
         h.id,
@@ -71,6 +72,8 @@ export async function POST() {
         newFx && newFx > 0 ? newFx : h.currentFxRate,
         user.id,
         sparkData,
+        priceResult?.prevPrice,
+        priceResult?.prevPriceSource,
       );
     }),
   );

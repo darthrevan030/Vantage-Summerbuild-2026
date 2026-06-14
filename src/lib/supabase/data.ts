@@ -51,6 +51,17 @@ interface DbHolding {
   created_at: string;
   updated_at: string;
   price_refreshed_at: string | null;
+  // SGX feature columns
+  source: string;
+  dividend_yield: number | null;
+  dividend_yield_auto: number | null;
+  prev_price: number | null;
+  prev_price_source: string | null;
+  maturity_date: string | null;
+  par_value: number | null;
+  coupon_rate: number | null;
+  transaction_type: "buy" | "sell";
+  fees: number;
 }
 
 function toHoldingRow(db: DbHolding): HoldingRow {
@@ -75,6 +86,16 @@ function toHoldingRow(db: DbHolding): HoldingRow {
     createdAt: db.created_at,
     updatedAt: db.updated_at,
     priceRefreshedAt: db.price_refreshed_at,
+    source: db.source ?? "",
+    dividendYield: db.dividend_yield != null ? Number(db.dividend_yield) : null,
+    dividendYieldAuto: db.dividend_yield_auto != null ? Number(db.dividend_yield_auto) : null,
+    prevPrice: db.prev_price != null ? Number(db.prev_price) : null,
+    prevPriceSource: db.prev_price_source ?? null,
+    maturityDate: db.maturity_date ?? null,
+    parValue: db.par_value != null ? Number(db.par_value) : null,
+    couponRate: db.coupon_rate != null ? Number(db.coupon_rate) : null,
+    transactionType: db.transaction_type ?? "buy",
+    fees: Number(db.fees ?? 0),
   };
 
   const valueSGD = computeCurrentValueSGD(base);
@@ -118,8 +139,18 @@ export async function fetchHoldings(userId: string): Promise<HoldingRow[]> {
   return (data as DbHolding[]).map(toHoldingRow);
 }
 
+type InsertPayload =
+  Omit<DbHolding, "id" | "created_at" | "updated_at" |
+    "source" | "dividend_yield" | "dividend_yield_auto" | "prev_price" |
+    "prev_price_source" | "maturity_date" | "par_value" | "coupon_rate" |
+    "transaction_type" | "fees"> &
+  Partial<Pick<DbHolding,
+    "source" | "dividend_yield" | "dividend_yield_auto" | "prev_price" |
+    "prev_price_source" | "maturity_date" | "par_value" | "coupon_rate" |
+    "transaction_type" | "fees">>;
+
 export async function insertHolding(
-  payload: Omit<DbHolding, "id" | "created_at" | "updated_at">,
+  payload: InsertPayload
 ): Promise<HoldingRow | null> {
   const supabase = await makeServerClient();
   const { data, error } = await supabase
@@ -139,23 +170,12 @@ export async function insertHolding(
 export async function updateHolding(
   id: string,
   userId: string,
-  patch: Partial<
-    Pick<
-      DbHolding,
-      | "ticker"
-      | "name"
-      | "asset_type"
-      | "broker"
-      | "strategy"
-      | "units"
-      | "currency"
-      | "buy_price"
-      | "buy_date"
-      | "buy_fx_rate"
-      | "current_price"
-      | "current_fx_rate"
-    >
-  >,
+  patch: Partial<Pick<DbHolding,
+    "ticker" | "name" | "asset_type" | "broker" | "strategy" | "units" |
+    "currency" | "buy_price" | "buy_date" | "buy_fx_rate" | "current_price" | "current_fx_rate" |
+    "source" | "dividend_yield" | "maturity_date" | "par_value" | "coupon_rate" |
+    "transaction_type" | "fees" | "prev_price" | "prev_price_source"
+  >>
 ): Promise<HoldingRow | null> {
   const supabase = await makeServerClient();
   const { data, error } = await supabase
@@ -178,6 +198,8 @@ export async function updateHoldingPrice(
   currentFxRate: number,
   userId: string,
   sparkData?: number[],
+  prevPrice?: number | null,
+  prevPriceSource?: string | null
 ): Promise<void> {
   const supabase = await makeServerClient();
   const patch: Record<string, unknown> = {
@@ -186,11 +208,9 @@ export async function updateHoldingPrice(
     price_refreshed_at: new Date().toISOString(),
   };
   if (sparkData && sparkData.length >= 2) patch.spark_data = sparkData;
-  await supabase
-    .from("holdings")
-    .update(patch)
-    .eq("id", id)
-    .eq("user_id", userId);
+  if (prevPrice != null)       patch.prev_price        = prevPrice;
+  if (prevPriceSource != null) patch.prev_price_source = prevPriceSource;
+  await supabase.from("holdings").update(patch).eq("id", id).eq("user_id", userId);
 }
 
 export async function deleteHolding(id: string, userId: string): Promise<void> {

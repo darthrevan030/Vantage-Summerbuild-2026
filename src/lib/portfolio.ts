@@ -6,6 +6,7 @@ import type {
   CurrencyCard,
   WaterfallItem,
   AllocationSlice,
+  AllocationBySource,
   PortfolioSeriesPoint,
   FxSeriesPoint,
 } from "@/types/portfolio";
@@ -73,10 +74,19 @@ export function computeHeroStats(
   const today = new Date().toISOString().slice(0, 10);
   const prevSnap = [...snapshots].reverse().find((s) => s.recordedDate < today);
   const dayChange = prevSnap ? total - prevSnap.valueSgd : 0;
-  const dayPct =
-    prevSnap && prevSnap.valueSgd > 0
-      ? (dayChange / prevSnap.valueSgd) * 100
-      : 0;
+  const dayPct = prevSnap && prevSnap.valueSgd > 0 ? (dayChange / prevSnap.valueSgd) * 100 : 0;
+
+  // Portfolio yield and annual income (weighted by SGD value)
+  let yieldedValue = 0;
+  let annualIncome = 0;
+  for (const h of holdings) {
+    const y = h.dividendYield ?? h.dividendYieldAuto;
+    if (y != null) {
+      yieldedValue += h.valueSGD;
+      annualIncome += (y / 100) * h.valueSGD;
+    }
+  }
+  const portfolioYield = yieldedValue > 0 ? (annualIncome / yieldedValue) * 100 : 0;
 
   return {
     total,
@@ -87,12 +97,25 @@ export function computeHeroStats(
     fxImpact,
     fxPct,
     neutral,
-    updated:
-      new Date().toLocaleTimeString("en-SG", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }) + " SGT",
+    updated: new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" }) + " SGT",
+    portfolioYield,
+    annualIncome,
   };
+}
+
+export function computeAllocationBySource(holdings: HoldingRow[]): AllocationBySource[] {
+  const map = new Map<string, { valueSGD: number; costSGD: number; count: number }>();
+  for (const h of holdings) {
+    const key = h.source || "Untagged";
+    const bucket = map.get(key) ?? { valueSGD: 0, costSGD: 0, count: 0 };
+    bucket.valueSGD += h.valueSGD;
+    bucket.costSGD += h.costSGD;
+    bucket.count += 1;
+    map.set(key, bucket);
+  }
+  return Array.from(map.entries())
+    .map(([source, b]) => ({ source, valueSGD: b.valueSGD, costSGD: b.costSGD, pnl: b.valueSGD - b.costSGD, count: b.count }))
+    .sort((a, b) => b.valueSGD - a.valueSGD);
 }
 
 export function computeAllocationByAsset(

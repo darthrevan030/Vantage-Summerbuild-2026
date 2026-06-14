@@ -1,23 +1,19 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export interface ProviderFlags {
-  eodhd: boolean;
-  yahoo: boolean;
-  coingecko: boolean;
-  goldapi: boolean;
-  finnhub: boolean;
+  sgx:         boolean;
+  eodhd:       boolean;
+  yahoo:       boolean;
+  coingecko:   boolean;
+  goldapi:     boolean;
+  finnhub:     boolean;
   frankfurter: boolean;
   anthropic: boolean;
 }
 
 const DEFAULT: ProviderFlags = {
-  eodhd: true,
-  yahoo: true,
-  coingecko: true,
-  goldapi: true,
-  finnhub: true,
-  frankfurter: true,
-  anthropic: true,
+  sgx: true, eodhd: true, yahoo: true, coingecko: true, goldapi: true,
+  finnhub: true, frankfurter: true, anthropic: true,
 };
 
 export async function getProviderFlags(): Promise<ProviderFlags> {

@@ -32,6 +32,14 @@ export function groupHoldings(rows: HoldingRow[]): GroupedHolding[] {
       totalPct: costSGD > 0 ? ((valueSGD - costSGD) / costSGD) * 100 : 0,
       currentPrice: first.currentPrice,
       sparkData: first.sparkData,
+      source: first.source,
+      dividendYield: first.dividendYield,
+      dividendYieldAuto: first.dividendYieldAuto,
+      prevPrice: first.prevPrice,
+      prevPriceSource: first.prevPriceSource,
+      maturityDate: first.maturityDate,
+      parValue: first.parValue,
+      couponRate: first.couponRate,
     };
   });
 }

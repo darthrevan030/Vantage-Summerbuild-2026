@@ -23,6 +23,10 @@ export async function POST(req: Request) {
   }
 
   const providers = await getProviderFlags();
-  const prices = await fetchLivePrices(tickers, {}, providers);
+  const priceResults = await fetchLivePrices(tickers, {}, providers);
+  // Return flat { ticker: price } — PriceResult.prevPrice is internal to the refresh route
+  const prices = Object.fromEntries(
+    Object.entries(priceResults).map(([t, r]) => [t, r.price])
+  );
   return Response.json(prices);
 }
