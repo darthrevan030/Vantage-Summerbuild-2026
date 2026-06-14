@@ -41,6 +41,26 @@ const FINNHUB_PREFIX: Record<string, string> = {
   CNH: "SHG:",
 };
 
+// Yahoo Finance suffixes by app exchange code (app ticker suffix or EODHD_CODE_REMAP output).
+// US stocks use no suffix. Covers all 14 exchanges the app supports.
+const YAHOO_SUFFIX: Record<string, string> = {
+  US:    "",
+  LSE:   ".L",
+  XETRA: ".DE",
+  TSE:   ".T",
+  NSE:   ".NS",
+  BSE:   ".BO",
+  HK:    ".HK",
+  HKEX:  ".HK",
+  SI:    ".SI",  // SGX — EODHD remaps SG→SI; Yahoo also uses .SI
+  SG:    ".SI",
+  AU:    ".AX",  // ASX — EODHD remaps ASX→AU; Yahoo uses .AX
+  ASX:   ".AX",
+  SHG:   ".SS",
+  SHE:   ".SZ",
+  MI:    ".MI",
+};
+
 /**
  * Returns the EODHD real-time symbol for a ticker.
  * If the ticker already contains a dot (e.g. "VWRA.LSE") it's used as-is.
@@ -53,6 +73,27 @@ function toEohdSymbol(ticker: string, currency: string): string {
   }
   const exchange = EODHD_EXCHANGE[currency] ?? "US";
   return `${ticker}.${exchange}`;
+}
+
+/**
+ * Returns the Yahoo Finance symbol for a ticker.
+ * US stocks: bare ticker (no suffix). All others: ticker + exchange suffix.
+ */
+function toYahooSymbol(ticker: string, currency: string): string {
+  if (ticker.includes(".")) {
+    const dot = ticker.lastIndexOf(".");
+    const sym = ticker.slice(0, dot);
+    const exc = ticker.slice(dot + 1).toUpperCase();
+    if (exc in YAHOO_SUFFIX) {
+      const suffix = YAHOO_SUFFIX[exc];
+      return suffix ? `${sym}${suffix}` : sym;
+    }
+    return ticker; // unknown exchange — pass through as-is
+  }
+  // no dot — look up by currency; default to bare ticker (US)
+  const exc = EODHD_EXCHANGE[currency] ?? "US";
+  const suffix = YAHOO_SUFFIX[exc] ?? "";
+  return suffix ? `${ticker}${suffix}` : ticker;
 }
 
 /**
@@ -146,19 +187,82 @@ export async function fetchLivePrices(
         const res = await fetch(
           `https://eodhd.com/api/real-time/${first}?api_token=${process.env.EODHD_API_KEY}&fmt=json${extra}`
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.warn("[fetchLivePrices] EODHD non-ok:", res.status, symbols);
+          return;
+        }
         const json = await res.json();
         // Single ticker → plain object; multiple tickers → array
-        const items: { code: string; close: number }[] = Array.isArray(json) ? json : [json];
+        const items: { code: string; close: unknown }[] = Array.isArray(json) ? json : [json];
         for (const item of items) {
           const ticker = symbolToTicker[item.code];
-          // An unmatched code means the holding silently keeps its stale price
-          if (!ticker) console.warn("[fetchLivePrices] unmatched EODHD code:", item.code);
-          if (ticker && item.close) prices[ticker] = item.close;
+          if (!ticker) {
+            console.warn("[fetchLivePrices] unmatched EODHD code:", item.code, "→ map has:", Object.keys(symbolToTicker));
+          }
+          // EODHD returns "NA" (string) for exchanges not in plan; treat as no data
+          const close = typeof item.close === "number" && item.close > 0 ? item.close : null;
+          if (!close) {
+            console.warn("[fetchLivePrices] no usable close for", item.code, "got:", item.close);
+          }
+          if (ticker && close) prices[ticker] = close;
         }
-      } catch {}
+      } catch (e) {
+        console.warn("[fetchLivePrices] EODHD error:", e);
+      }
     })(),
   ]);
+
+  // Yahoo Finance fallback — free, no key, covers all 14 supported exchanges.
+  // Runs after EODHD so it only fills gaps (exchanges EODHD doesn't price).
+  // Uses v8 API with crumb auth (v7 now returns 401 without cookie+crumb).
+  const unpriced = equities.filter((t) => prices[t] === undefined);
+  if (unpriced.length > 0) {
+    const yahooSymbolToTicker: Record<string, string> = {};
+    const yahooSymbols: string[] = [];
+    for (const ticker of unpriced) {
+      const sym = toYahooSymbol(ticker, tickerCurrency[ticker] ?? "USD");
+      yahooSymbolToTicker[sym] = ticker;
+      yahooSymbols.push(sym);
+    }
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+    try {
+      // Step 1: acquire Yahoo session cookie from fc.yahoo.com (consent endpoint)
+      const cookieRes = await fetch("https://fc.yahoo.com/", {
+        headers: { "User-Agent": UA, "Accept": "text/html,*/*" },
+      });
+      type HeadersWithCookies = Headers & { getSetCookie?: () => string[] };
+      const rawCookies = (cookieRes.headers as HeadersWithCookies).getSetCookie?.() ?? [];
+      const cookie = rawCookies.map((c) => c.split(";")[0]).join("; ");
+
+      // Step 2: exchange cookie for a crumb token
+      const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+        headers: { "User-Agent": UA, "Cookie": cookie },
+      });
+      const crumb = crumbRes.ok ? (await crumbRes.text()).trim() : "";
+
+      // Step 3: bulk quote via v8 (crumb required) or v7 fallback
+      const url = crumb && crumb !== "NA"
+        ? `https://query2.finance.yahoo.com/v8/finance/quote?formatted=false&crumb=${encodeURIComponent(crumb)}&symbols=${yahooSymbols.join(",")}`
+        : `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yahooSymbols.join(",")}`;
+
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, "Cookie": cookie, "Accept": "application/json" },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        for (const q of (json?.quoteResponse?.result ?? []) as { symbol: string; regularMarketPrice: number }[]) {
+          const ticker = yahooSymbolToTicker[q.symbol];
+          if (ticker && typeof q.regularMarketPrice === "number" && q.regularMarketPrice > 0) {
+            prices[ticker] = q.regularMarketPrice;
+          }
+        }
+      } else {
+        console.warn("[fetchLivePrices] Yahoo non-ok:", res.status, "crumb:", !!crumb, yahooSymbols);
+      }
+    } catch (e) {
+      console.warn("[fetchLivePrices] Yahoo error:", e);
+    }
+  }
 
   return prices;
 }
