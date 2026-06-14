@@ -4,6 +4,7 @@ import "./globals.css";
 import { headers } from "next/headers";
 
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next"
 import { AppToaster } from "@/components/AppToaster";
 
 const dmSerif = DM_Serif_Display({
@@ -62,6 +63,7 @@ export default async function RootLayout({
         {children}
         <AppToaster />
       </body>
+      <SpeedInsights />
       <Analytics />
     </html>
   );
