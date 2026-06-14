@@ -16,7 +16,8 @@ export function createTableListGET<Row>(table: string, columns: string, fallback
 
       if (error || !data) return NextResponse.json(fallback);
       return NextResponse.json(data);
-    } catch {
+    } catch (e) {
+      console.error("[list-route] %s unreachable:", table, e);
       return NextResponse.json(fallback);
     }
   };

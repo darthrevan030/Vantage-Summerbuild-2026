@@ -5,7 +5,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { adminClient, error: authError } = await requireAdmin();
+  const { adminClient, user, error: authError } = await requireAdmin();
   if (authError) return authError;
 
   const { id: targetId } = await params;
@@ -43,12 +43,20 @@ export async function PATCH(
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[admin/users] DB error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 
   if (!data?.length) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  await adminClient.from("audit_log").insert({
+    actor_id: user.id,
+    action: "role_change",
+    target_id: targetId,
+    detail: { role },
+  });
 
   return NextResponse.json({ role });
 }

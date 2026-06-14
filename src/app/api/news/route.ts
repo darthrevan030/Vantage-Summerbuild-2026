@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/supabase/guards";
+import { enforceRateLimit } from "@/lib/supabase/rate-limit";
 
 const POS = /\b(surge|beat|record|gain|rise|profit|growth|upgrade|strong|soar|exceed|higher|boost|rally|outperform|rebound)\b/i;
 const NEG = /\b(fall|miss|cut|loss|drop|plunge|downgrade|weak|decline|warn|disappoint|tumble|slide|concern|risk|below|slump)\b/i;
@@ -42,12 +43,19 @@ function toFinnhubNews(raw: string): string {
   return `${prefix}${base}`;
 }
 
+const SYMBOL_RE = /^[A-Za-z0-9.\-:]{1,30}$/;
+
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth();
   if (error) return error;
 
+  const limited = await enforceRateLimit("news", 30, 60);
+  if (limited) return limited;
+
   const symbol = req.nextUrl.searchParams.get("symbol");
   if (!symbol) return Response.json({ error: "symbol required" }, { status: 400 });
+  if (!SYMBOL_RE.test(symbol))
+    return Response.json({ error: "invalid symbol format" }, { status: 400 });
 
   const key = process.env.FINNHUB_API_KEY;
   // Return a special sentinel so the client knows the API is offline (vs. no results)

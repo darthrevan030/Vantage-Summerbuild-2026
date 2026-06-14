@@ -1,13 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Serif_Display, JetBrains_Mono, Sora } from "next/font/google";
 import "./globals.css";
+import { headers } from "next/headers";
 
 import { Analytics } from "@vercel/analytics/next";
 import { AppToaster } from "@/components/AppToaster";
-
-/* Runs before paint: stored choice wins, otherwise follow the OS.
-   Dark is the class-absent default; .light is additive. */
-const themeInit = `(function(){try{var t=localStorage.getItem("theme");var l=t?t==="light":window.matchMedia("(prefers-color-scheme: light)").matches;if(l)document.documentElement.classList.add("light")}catch(e){}})()`;
 
 const dmSerif = DM_Serif_Display({
   variable: "--font-serif",
@@ -46,11 +43,12 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get("x-nonce") ?? "";
   return (
     <html
       lang="en"
@@ -58,7 +56,7 @@ export default function RootLayout({
       className={`${dmSerif.variable} ${jetbrainsMono.variable} ${sora.variable}`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+        <script src="/theme-init.js" nonce={nonce} />
       </head>
       <body>
         {children}

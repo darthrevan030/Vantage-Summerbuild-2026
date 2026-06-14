@@ -1,6 +1,7 @@
 import { fetchHoldings, updateHoldingPrice, recordSnapshot } from "@/lib/supabase/data";
 import { fetchLivePrices, fetchLiveFxRates, fetchCryptoSparks, fetchEquitySparks } from "@/lib/prices";
 import { requireAuth } from "@/lib/supabase/guards";
+import { enforceRateLimit } from "@/lib/supabase/rate-limit";
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -12,6 +13,9 @@ function isStale(priceRefreshedAt: string | null): boolean {
 export async function POST() {
   const { user, error } = await requireAuth();
   if (error) return error;
+
+  const limited = await enforceRateLimit("refresh", 12, 60);
+  if (limited) return limited;
 
   const holdings = await fetchHoldings(user.id);
   const stale = holdings.filter((h) => isStale(h.priceRefreshedAt));

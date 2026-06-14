@@ -184,7 +184,10 @@ export async function POST() {
     .from("portfolio_snapshots")
     .upsert(rows, { onConflict: "user_id,recorded_date" });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[holdings/backfill] DB error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 
   return NextResponse.json({ inserted: rows.length, skipped: existingDates.size });
 }

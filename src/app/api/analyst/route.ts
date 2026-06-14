@@ -1,6 +1,7 @@
 // app/api/analyst/route.ts
 import Anthropic from "@anthropic-ai/sdk";
 import { requireAuth } from "@/lib/supabase/guards";
+import { enforceRateLimit } from "@/lib/supabase/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,9 @@ function buildAsk(question: string, holdings: AskHolding[], totalSGD: number) {
 export async function POST(req: Request) {
   const { error } = await requireAuth();
   if (error) return error;
+
+  const limited = await enforceRateLimit("analyst", 10, 60, { failClosed: true });
+  if (limited) return limited;
 
   const raw = await req.json().catch(() => null);
   const parsed = parseBody(raw);
