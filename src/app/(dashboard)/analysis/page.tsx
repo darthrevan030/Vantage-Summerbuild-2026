@@ -40,7 +40,7 @@ const FALLBACK_ITEMS: Record<string, { score: number; summary: string; drivers: 
   ASML:   { score: 58, summary: "Semicon equipment demand driven by AI investment cycle; US export controls are the main risk.", drivers: ["AI capex", "Export controls", "Monopoly"] },
   FMG:    { score: 22, summary: "Iron ore demand uncertain as China stimulus expectations fade; strong yield and low debt partially offset.", drivers: ["China demand", "Dividend", "Ore price"] },
 };
-const FALLBACK_OVERALL = { score: 43, note: "Constructive book; rates and FX are the swing factors." };
+const FALLBACK_OVERALL = { score: 0, note: "AI Analysis Currently Unavailable" };
 
 // deterministic 12-pt sentiment path ending at `score`
 function hashStr(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
