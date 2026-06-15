@@ -8,6 +8,7 @@ import { fetchFx } from "@/lib/api-client";
 import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
+import type { ParsedTrade, ParseResult } from "@/lib/pdf-parsers";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
 
@@ -874,10 +875,254 @@ function ManualForm() {
   );
 }
 
+// ---- PDF import ----
+
+const CCY_FLAGS_EXT: Record<string, string> = {
+  SGD: "🇸🇬", USD: "🇺🇸", EUR: "🇪🇺", AUD: "🇦🇺",
+  GBP: "🇬🇧", INR: "🇮🇳", JPY: "🇯🇵", HKD: "🇭🇰",
+};
+
+function PdfImportPanel() {
+  const router = useRouter();
+  const pdfRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [result, setResult] = useState<ParseResult | null>(null);
+  const [rows, setRows] = useState<ParsedTrade[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState("");
+  const [error, setError] = useState("");
+
+  const handlePdf = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Please select a PDF file.");
+      return;
+    }
+    setError("");
+    setResult(null);
+    setRows([]);
+    setImportResult("");
+    setParsing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/parse-pdf", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Parse failed");
+      const parsed = data as ParseResult;
+      setResult(parsed);
+      setRows(parsed.trades.map((t) => ({ ...t })));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Parse failed");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const updateRow = (idx: number, key: keyof ParsedTrade, value: string | number) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [key]: value };
+      return next;
+    });
+  };
+
+  const removeRow = (idx: number) => setRows((prev) => prev.filter((_, i) => i !== idx));
+
+  const handleImport = async () => {
+    setImporting(true);
+    setImportResult("");
+    let ok = 0, fail = 0;
+    for (const row of rows) {
+      if (!row.name || !row.buy_price || !row.units) { fail++; continue; }
+      const baseTicker = row.ticker.toUpperCase() || "—";
+      const tickerWithExchange = baseTicker !== "—" && row.exchange
+        ? `${baseTicker}.${row.exchange}`
+        : baseTicker;
+      try {
+        const res = await fetch("/api/holdings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: tickerWithExchange,
+            name: row.name,
+            asset_type: row.asset_type || "ETF",
+            broker: row.broker || "FSMOne",
+            strategy: "long_term",
+            units: row.units,
+            currency: row.currency,
+            flag: CCY_FLAGS_EXT[row.currency] ?? "🌐",
+            icon: row.asset_type === "ETF" ? "layers" : "briefcase",
+            buy_price: row.buy_price,
+            buy_date: row.buy_date,
+            buy_fx_rate: row.buy_fx_rate || 1,
+            current_price: row.buy_price,
+            current_fx_rate: row.buy_fx_rate || 1,
+            spark_data: [row.buy_price],
+            fees: row.fees ?? 0,
+            source: row.source || "",
+            transaction_type: "buy",
+          }),
+        });
+        if (res.ok) ok++; else fail++;
+      } catch { fail++; }
+    }
+    const summary = `Imported ${ok} holding${ok !== 1 ? "s" : ""}${fail > 0 ? ` · ${fail} failed` : ""}.`;
+    setImportResult(summary);
+    setImporting(false);
+    if (fail > 0) toast.error(summary);
+    else if (ok > 0) toast.success(summary);
+    if (ok > 0) { setRows([]); setResult(null); router.refresh(); }
+  };
+
+  return (
+    <div>
+      <input
+        ref={pdfRef}
+        type="file"
+        accept=".pdf"
+        style={{ display: "none" }}
+        onChange={(e) => { if (e.target.files?.[0]) handlePdf(e.target.files[0]); }}
+      />
+
+      {!result && (
+        <div
+          className={
+            "flex flex-col items-center gap-[7px] text-center border-[1.5px] border-dashed rounded-[13px] cursor-pointer px-5 py-[30px] [transition:background_.2s,border-color_.2s] " +
+            (drag
+              ? "bg-elevated border-gold"
+              : "bg-surface border-gold-soft hover:bg-elevated hover:border-gold")
+          }
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handlePdf(f); }}
+          onClick={() => pdfRef.current?.click()}
+        >
+          <Icon name="upload" size={26} style={{ color: "var(--gold)" }} />
+          <div className="font-ui text-[14px] font-semibold mt-1">
+            {parsing ? "Parsing PDF…" : "Drop PDF here"}
+          </div>
+          <div className="font-ui text-secondary">{parsing ? "Please wait" : "or click to browse"}</div>
+          <div className="font-ui text-secondary text-[11px] tracking-[.04em] mt-2">
+            FSMOne · DBS Vickers · more brokers coming
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="font-ui mt-3 text-[12px]" style={{ color: "var(--loss)" }}>
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="flex flex-col gap-3 mt-2">
+          <div className="flex items-center justify-between">
+            <span className="font-ui text-[12px] text-secondary">
+              {result.broker} · {result.docType} · {rows.length} trade{rows.length !== 1 ? "s" : ""} found
+            </span>
+            <button
+              className="font-ui text-[11px] text-muted hover:text-primary cursor-pointer"
+              onClick={() => { setResult(null); setRows([]); setImportResult(""); setError(""); }}
+            >
+              ✕ clear
+            </button>
+          </div>
+
+          {result.warnings.length > 0 && (
+            <div className="rounded-[9px] border border-subtle bg-elevated px-3 py-2 flex flex-col gap-1">
+              {result.warnings.map((w, i) => (
+                <div key={i} className="font-ui text-[11px]" style={{ color: "var(--gold)" }}>
+                  ⚠ {w}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
+                <thead>
+                  <tr className="font-ui text-[10px] uppercase tracking-[.08em] text-secondary">
+                    {["Name", "Ticker", "Exch", "Type", "Units", "CCY", "Price", "Date", "FX Rate", ""].map((h) => (
+                      <th key={h} style={{ padding: "4px 8px 8px", whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid var(--border-subtle)" }}>
+                      {(
+                        [
+                          { key: "name", w: 160 },
+                          { key: "ticker", w: 70 },
+                          { key: "exchange", w: 60 },
+                          { key: "asset_type", w: 60 },
+                          { key: "units", w: 70, type: "number" },
+                          { key: "currency", w: 55 },
+                          { key: "buy_price", w: 80, type: "number" },
+                          { key: "buy_date", w: 110, type: "date" },
+                          { key: "buy_fx_rate", w: 70, type: "number" },
+                        ] as { key: keyof ParsedTrade; w: number; type?: string }[]
+                      ).map(({ key, w, type }) => (
+                        <td key={key} style={{ padding: "4px 4px" }}>
+                          <input
+                            className="font-mono text-[11px] rounded-[6px] bg-elevated border border-subtle px-1.5 py-1 focus:outline-none focus:border-gold"
+                            style={{ width: w, minWidth: 40 }}
+                            type={type ?? "text"}
+                            value={String(row[key] ?? "")}
+                            step={type === "number" ? "any" : undefined}
+                            onChange={(e) =>
+                              updateRow(i, key, type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)
+                            }
+                          />
+                        </td>
+                      ))}
+                      <td style={{ padding: "4px 4px" }}>
+                        <button
+                          className="font-ui text-[11px] text-muted hover:text-loss cursor-pointer px-1"
+                          onClick={() => removeRow(i)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {importResult && (
+            <div
+              className="font-ui text-[12px]"
+              style={{ color: importResult.includes("failed") ? "var(--loss)" : "var(--gain)" }}
+            >
+              {importResult}
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <button
+              className="flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+              onClick={handleImport}
+              disabled={importing}
+            >
+              <Icon name="upload" size={15} />
+              {importing ? "Importing…" : `Import ${rows.length} holding${rows.length !== 1 ? "s" : ""}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- import & backup panel ----
 function ImportPanel() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<"csv" | "pdf">("csv");
   const [drag, setDrag] = useState(false);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<CsvRow[]>([]);
@@ -1010,22 +1255,37 @@ function ImportPanel() {
         <span className="text-[13px] font-semibold text-primary tracking-[.01em]">
           Import &amp; Backup
         </span>
-        <span className="font-ui text-secondary text-[11px]">
-          CSV · XLSX · JSON
-        </span>
+        <div className="flex gap-1.5">
+          {(["csv", "pdf"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={
+                "cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] uppercase tracking-[.06em] transition-all duration-150 " +
+                (importMode === mode
+                  ? "border-gold-soft bg-wash text-gold"
+                  : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+              }
+              onClick={() => setImportMode(mode)}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {importMode === "pdf" && <PdfImportPanel />}
 
       <input
         ref={fileRef}
         type="file"
         accept=".csv,.txt"
-        style={{ display: "none" }}
+        style={{ display: importMode === "csv" ? undefined : "none" }}
         onChange={(e) => {
           if (e.target.files?.[0]) handleFile(e.target.files[0]);
         }}
       />
 
-      <div
+      {importMode === "csv" && <div
         className={
           "flex flex-col items-center gap-[7px] text-center border-[1.5px] border-dashed rounded-[13px] cursor-pointer px-5 py-[30px] [transition:background_.2s,border-color_.2s] " +
           (drag
@@ -1049,9 +1309,9 @@ function ImportPanel() {
         <div className="font-ui text-secondary text-[11px] tracking-[.04em] mt-2">
           Supported: Tiger · Saxo · DBS Vickers · IBKR · Moomoo
         </div>
-      </div>
+      </div>}
 
-      {headers.length > 0 && (
+      {importMode === "csv" && headers.length > 0 && (
         <div className="mt-[18px] flex flex-col gap-[9px]">
           <div className="flex justify-between text-[10.5px] uppercase tracking-[.08em] pb-1 font-ui text-secondary">
             <span>Your Column</span>
