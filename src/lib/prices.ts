@@ -1,6 +1,13 @@
 import YahooFinanceClass from "yahoo-finance2";
+import { fetchSGXPrices } from "@/lib/providers/sgx";
 // v3: default export is the class, not an instance
 const yahooFinance = new YahooFinanceClass();
+
+export interface PriceResult {
+  price: number;
+  prevPrice: number | null;
+  prevPriceSource: string | null;
+}
 
 const CRYPTO_IDS: Record<string, string> = {
   BTC: "bitcoin",
@@ -88,7 +95,7 @@ function toEohdSymbol(ticker: string, currency: string): string {
  * Returns the Yahoo Finance symbol for a ticker.
  * US stocks: bare ticker (no suffix). All others: ticker + exchange suffix.
  */
-function toYahooSymbol(ticker: string, currency: string): string {
+export function toYahooSymbol(ticker: string, currency: string): string {
   if (ticker.includes(".")) {
     const dot = ticker.lastIndexOf(".");
     const sym = ticker.slice(0, dot);
@@ -143,147 +150,145 @@ export async function fetchCryptoSparks(
 }
 
 export interface PriceProviders {
-  eodhd?: boolean;
-  yahoo?: boolean;
+  sgx?:       boolean;
+  eodhd?:     boolean;
+  yahoo?:     boolean;
   coingecko?: boolean;
   goldapi?: boolean;
 }
 
 /**
  * Fetches live prices for all tickers.
- * tickerCurrency maps ticker → holding currency so the correct exchange is used.
- * providers lets callers disable individual data sources (e.g. to preserve daily quotas during testing).
+ * Returns PriceResult per ticker including prevPrice and its source.
+ * SGX tickers (SGD currency, non-crypto, non-gold) hit the SGX direct API first;
+ * other equities use EODHD → Yahoo fallback chain.
  */
 export async function fetchLivePrices(
   tickers: string[],
   tickerCurrency: Record<string, string> = {},
-  providers: PriceProviders = {},
-): Promise<Record<string, number>> {
-  const prices: Record<string, number> = {};
-  if (tickers.length === 0) return prices;
+  providers: PriceProviders = {}
+): Promise<Record<string, PriceResult>> {
+  const results: Record<string, PriceResult> = {};
+  if (tickers.length === 0) return results;
 
-  const crypto = tickers.filter((t) => CRYPTO_IDS[t]);
-  const gold = tickers.filter((t) => GOLD_TICKERS.has(t));
-  const equities = tickers.filter(
-    (t) => !CRYPTO_IDS[t] && !GOLD_TICKERS.has(t),
-  );
+  const crypto   = tickers.filter((t) => CRYPTO_IDS[t]);
+  const gold     = tickers.filter((t) => GOLD_TICKERS.has(t));
+  const allEquities = tickers.filter((t) => !CRYPTO_IDS[t] && !GOLD_TICKERS.has(t));
+
+  // SGX tickers: SGD-denominated equities (not crypto/gold)
+  const sgxTickers = allEquities.filter((t) => (tickerCurrency[t] ?? "USD") === "SGD");
+  const otherEquities = allEquities.filter((t) => (tickerCurrency[t] ?? "USD") !== "SGD");
 
   await Promise.all([
-    crypto.length > 0 &&
-      (providers.coingecko ?? true) &&
-      (async () => {
-        const ids = crypto.map((t) => CRYPTO_IDS[t]).join(",");
+    crypto.length > 0 && (providers.coingecko ?? true) && (async () => {
+      const ids = crypto.map((t) => CRYPTO_IDS[t]).join(",");
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
+      );
+      if (res.ok) {
+        const json = await res.json();
+        for (const t of crypto) {
+          const p = json[CRYPTO_IDS[t]]?.usd;
+          if (p) results[t] = { price: p, prevPrice: null, prevPriceSource: null };
+        }
+      }
+    })(),
+
+    gold.length > 0 && (providers.goldapi ?? true) && process.env.GOLDAPI_KEY && (async () => {
+      const res = await fetch("https://www.goldapi.io/api/XAU/USD", {
+        headers: { "x-access-token": process.env.GOLDAPI_KEY! },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.price) for (const t of gold) results[t] = { price: json.price, prevPrice: null, prevPriceSource: null };
+      }
+    })(),
+
+    // SGX direct API — highest priority for SGD equities
+    sgxTickers.length > 0 && (providers.sgx ?? true) && (async () => {
+      try {
+        const sgxData = await fetchSGXPrices(new Set(sgxTickers));
+        for (const [ticker, q] of Object.entries(sgxData)) {
+          if (q.price > 0) {
+            results[ticker] = { price: q.price, prevPrice: q.prevPrice, prevPriceSource: "SGX" };
+          }
+        }
+      } catch (e) {
+        console.warn("[fetchLivePrices] SGX error:", e);
+      }
+    })(),
+
+    // EODHD bulk call for non-SGD equities
+    otherEquities.length > 0 && (providers.eodhd ?? true) && process.env.EODHD_API_KEY && (async () => {
+      const symbolToTicker: Record<string, string> = {};
+      const symbols = otherEquities.map((ticker) => {
+        const sym = toEohdSymbol(ticker, tickerCurrency[ticker] ?? "USD");
+        symbolToTicker[sym] = ticker;
+        return sym;
+      });
+      try {
+        const [first, ...rest] = symbols;
+        const extra = rest.length > 0 ? `&s=${rest.join(",")}` : "";
         const res = await fetch(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
+          `https://eodhd.com/api/real-time/${first}?api_token=${process.env.EODHD_API_KEY}&fmt=json${extra}`
         );
-        if (res.ok) {
-          const json = await res.json();
-          for (const t of crypto) {
-            const p = json[CRYPTO_IDS[t]]?.usd;
-            if (p) prices[t] = p;
+        if (!res.ok) {
+          console.warn("[fetchLivePrices] EODHD non-ok:", res.status, symbols);
+          return;
+        }
+        const json = await res.json();
+        const items: { code: string; close: unknown; previousClose?: unknown }[] =
+          Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          const ticker = symbolToTicker[item.code];
+          if (!ticker) {
+            console.warn("[fetchLivePrices] unmatched EODHD code:", item.code);
+          }
+          const close = typeof item.close === "number" && item.close > 0 ? item.close : null;
+          if (!close) {
+            console.warn("[fetchLivePrices] no usable close for", item.code, "got:", item.close);
+          }
+          const prevClose = typeof item.previousClose === "number" && item.previousClose > 0
+            ? item.previousClose : null;
+          if (ticker && close) {
+            results[ticker] = { price: close, prevPrice: prevClose, prevPriceSource: prevClose ? "EODHD" : null };
           }
         }
-      })(),
-
-    gold.length > 0 &&
-      (providers.goldapi ?? true) &&
-      process.env.GOLDAPI_KEY &&
-      (async () => {
-        const res = await fetch("https://www.goldapi.io/api/XAU/USD", {
-          headers: { "x-access-token": process.env.GOLDAPI_KEY! },
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.price) for (const t of gold) prices[t] = json.price;
-        }
-      })(),
-
-    equities.length > 0 &&
-      (providers.eodhd ?? true) &&
-      process.env.EODHD_API_KEY &&
-      (async () => {
-        // Build symbol → original ticker reverse map, then do one bulk call instead of N
-        const symbolToTicker: Record<string, string> = {};
-        const symbols = equities.map((ticker) => {
-          const sym = toEohdSymbol(ticker, tickerCurrency[ticker] ?? "USD");
-          symbolToTicker[sym] = ticker;
-          return sym;
-        });
-        try {
-          const [first, ...rest] = symbols;
-          const extra = rest.length > 0 ? `&s=${rest.join(",")}` : "";
-          const res = await fetch(
-            `https://eodhd.com/api/real-time/${first}?api_token=${process.env.EODHD_API_KEY}&fmt=json${extra}`,
-          );
-          if (!res.ok) {
-            console.warn(
-              "[fetchLivePrices] EODHD non-ok:",
-              res.status,
-              symbols,
-            );
-            return;
-          }
-          const json = await res.json();
-          // Single ticker → plain object; multiple tickers → array
-          const items: { code: string; close: unknown }[] = Array.isArray(json)
-            ? json
-            : [json];
-          for (const item of items) {
-            const ticker = symbolToTicker[item.code];
-            if (!ticker) {
-              console.warn(
-                "[fetchLivePrices] unmatched EODHD code:",
-                item.code,
-                "→ map has:",
-                Object.keys(symbolToTicker),
-              );
-            }
-            // EODHD returns "NA" (string) for exchanges not in plan; treat as no data
-            const close =
-              typeof item.close === "number" && item.close > 0
-                ? item.close
-                : null;
-            if (!close) {
-              console.warn(
-                "[fetchLivePrices] no usable close for",
-                item.code,
-                "got:",
-                item.close,
-              );
-            }
-            if (ticker && close) prices[ticker] = close;
-          }
-        } catch (e) {
-          console.warn("[fetchLivePrices] EODHD error:", e);
-        }
-      })(),
+      } catch (e) {
+        console.warn("[fetchLivePrices] EODHD error:", e);
+      }
+    })(),
   ]);
 
-  // Yahoo Finance fallback via yahoo-finance2 (handles crumb/auth internally).
-  const unpriced = equities.filter((t) => prices[t] === undefined);
-  if (unpriced.length > 0 && (providers.yahoo ?? true)) {
+  // Yahoo fallback: SGX tickers that SGX API missed + other equities that EODHD missed
+  const unpriced = allEquities.filter((t) => !results[t]);
+  // Also use Yahoo for SGX tickers that got a price but no prevPrice
+  const needsPrevFromYahoo = sgxTickers.filter((t) => results[t] && results[t].prevPrice === null);
+  const yahooNeeded = [...new Set([...unpriced, ...needsPrevFromYahoo])];
+
+  if (yahooNeeded.length > 0 && (providers.yahoo ?? true)) {
     const yahooSymbolToTicker: Record<string, string> = {};
     const yahooSymbols: string[] = [];
-    for (const ticker of unpriced) {
+    for (const ticker of yahooNeeded) {
       const sym = toYahooSymbol(ticker, tickerCurrency[ticker] ?? "USD");
       yahooSymbolToTicker[sym] = ticker;
       yahooSymbols.push(sym);
     }
     try {
-      const results = await yahooFinance.quote(
-        yahooSymbols,
-        {},
-        { validateResult: false },
-      );
-      const arr = Array.isArray(results) ? results : [results];
+      const quotes = await yahooFinance.quote(yahooSymbols, {}, { validateResult: false });
+      const arr = Array.isArray(quotes) ? quotes : [quotes];
       for (const q of arr) {
         const ticker = yahooSymbolToTicker[q.symbol];
-        if (
-          ticker &&
-          typeof q.regularMarketPrice === "number" &&
-          q.regularMarketPrice > 0
-        ) {
-          prices[ticker] = q.regularMarketPrice;
+        if (!ticker) continue;
+        const price = typeof q.regularMarketPrice === "number" && q.regularMarketPrice > 0
+          ? q.regularMarketPrice : null;
+        const prevPrice = typeof q.regularMarketPreviousClose === "number" && q.regularMarketPreviousClose > 0
+          ? q.regularMarketPreviousClose : null;
+        if (!results[ticker] && price) {
+          results[ticker] = { price, prevPrice, prevPriceSource: prevPrice ? "Yahoo" : null };
+        } else if (results[ticker] && results[ticker].prevPrice === null && prevPrice) {
+          // Supplement prevPrice for holdings that got price from SGX but lacked prevPrice
+          results[ticker] = { ...results[ticker], prevPrice, prevPriceSource: "Yahoo" };
         }
       }
     } catch (e) {
@@ -291,7 +296,7 @@ export async function fetchLivePrices(
     }
   }
 
-  return prices;
+  return results;
 }
 
 /**

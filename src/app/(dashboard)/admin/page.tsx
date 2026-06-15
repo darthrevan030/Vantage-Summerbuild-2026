@@ -51,23 +51,26 @@ export default async function AdminPage() {
     { count: totalHoldings },
     { data: staleRows },
     { count: staleCount },
+    { data: instrumentRows },
     { data: currencyRows },
     { data: exchangeRows },
     providerFlags,
   ] = await Promise.all([
     adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     supabase.from("user_settings").select("user_id, display_name, role"),
-    supabase.from("holdings").select("user_id"),
-    supabase.from("holdings").select("*", { count: "exact", head: true }),
+    supabase.from("lots").select("user_id"),
+    supabase.from("lots").select("*", { count: "exact", head: true }),
+    // Stale prices now live in the shared ticker_quotes cache, keyed by symbol
     supabase
-      .from("holdings")
-      .select("id, ticker, name, price_refreshed_at")
-      .or(`price_refreshed_at.is.null,price_refreshed_at.lt.${staleThreshold}`)
-      .order("price_refreshed_at", { ascending: true, nullsFirst: true }),
+      .from("ticker_quotes")
+      .select("symbol, refreshed_at")
+      .or(`refreshed_at.is.null,refreshed_at.lt.${staleThreshold}`)
+      .order("refreshed_at", { ascending: true, nullsFirst: true }),
     supabase
-      .from("holdings")
+      .from("ticker_quotes")
       .select("*", { count: "exact", head: true })
-      .or(`price_refreshed_at.is.null,price_refreshed_at.lt.${staleThreshold}`),
+      .or(`refreshed_at.is.null,refreshed_at.lt.${staleThreshold}`),
+    supabase.from("instruments").select("symbol, name"),
     supabase
       .from("currencies")
       .select("code, label, active, display_order")
@@ -108,20 +111,26 @@ export default async function AdminPage() {
     holdingCount: holdingCountByUser[u.id] ?? 0,
   }));
 
+  // Resolve symbol → display name from the instruments table
+  const nameBySymbol: Record<string, string> = {};
+  (instrumentRows as { symbol: string; name: string }[] | null ?? []).forEach(
+    (i) => {
+      if (!nameBySymbol[i.symbol]) nameBySymbol[i.symbol] = i.name;
+    },
+  );
+
   const staleTickers: StaleTicker[] = (
     (staleRows as
       | {
-          id: string;
-          ticker: string;
-          name: string;
-          price_refreshed_at: string | null;
+          symbol: string;
+          refreshed_at: string | null;
         }[]
       | null) ?? []
   ).map((r) => ({
-    id: r.id,
-    ticker: r.ticker,
-    name: r.name,
-    priceRefreshedAt: r.price_refreshed_at,
+    id: r.symbol,
+    ticker: r.symbol,
+    name: nameBySymbol[r.symbol] ?? r.symbol,
+    priceRefreshedAt: r.refreshed_at,
   }));
 
   return (

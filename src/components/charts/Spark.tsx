@@ -17,12 +17,25 @@ export function Spark({
   fill = true,
   sw = 1.75,
 }: SparkProps) {
-  const min = Math.min(...pts);
-  const max = Math.max(...pts);
+  // Need at least two finite points to draw a line; otherwise render an empty
+  // (correctly-sized) box so the layout holds without emitting NaN coordinates.
+  const valid = pts.filter((v) => Number.isFinite(v));
+  if (valid.length < 2) {
+    return (
+      <svg
+        width={w}
+        height={h}
+        style={{ display: "block", overflow: "visible" }}
+      />
+    );
+  }
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
   const rng = max - min || 1;
-  const step = w / (pts.length - 1);
+  const step = w / (valid.length - 1);
   const Y = (v: number) => h - 4 - ((v - min) / rng) * (h - 8);
-  const line = pts
+  const line = valid
     .map(
       (v, i) =>
         `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${Y(v).toFixed(1)}`,
@@ -50,7 +63,7 @@ export function Spark({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      <circle cx={w} cy={Y(pts[pts.length - 1])} r="2.4" fill={color} />
+      <circle cx={w} cy={Y(valid[valid.length - 1])} r="2.4" fill={color} />
     </svg>
   );
 }

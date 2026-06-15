@@ -1,7 +1,21 @@
 import type { HoldingRow } from "@/types/holding";
 
+const SGX_DEFAULTS = {
+  source: "",
+  dividendYield: null,
+  dividendYieldAuto: null,
+  prevPrice: null,
+  prevPriceSource: null,
+  maturityDate: null,
+  parValue: null,
+  couponRate: null,
+  transactionType: "buy" as const,
+  fees: 0,
+};
+
 export const SEED: HoldingRow[] = [
   {
+    ...SGX_DEFAULTS,
     id: "seed-1",
     userId: "demo",
     ticker: "AAPL",
@@ -40,6 +54,7 @@ export const SEED: HoldingRow[] = [
     },
   },
   {
+    ...SGX_DEFAULTS,
     id: "seed-2",
     userId: "demo",
     ticker: "CICT",
@@ -78,6 +93,7 @@ export const SEED: HoldingRow[] = [
     },
   },
   {
+    ...SGX_DEFAULTS,
     id: "seed-3",
     userId: "demo",
     ticker: "IWDA",
@@ -114,6 +130,7 @@ export const SEED: HoldingRow[] = [
     },
   },
   {
+    ...SGX_DEFAULTS,
     id: "seed-4",
     userId: "demo",
     ticker: "—",
@@ -152,6 +169,7 @@ export const SEED: HoldingRow[] = [
     },
   },
   {
+    ...SGX_DEFAULTS,
     id: "seed-5",
     userId: "demo",
     ticker: "—",

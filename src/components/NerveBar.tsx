@@ -73,13 +73,13 @@ export function NerveBar({
     else toast.error("Failed to save base currency");
   }
 
-  const wordmark = displayName ? `${displayName}'s Portfolio` : "PORTFOLIO";
+  const wordmark = displayName ? `${displayName}'s Vantage` : "VANTAGE";
 
   async function handleLogout() {
     setLoggingOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/");
   }
 
   return (

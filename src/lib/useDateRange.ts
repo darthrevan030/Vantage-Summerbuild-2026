@@ -9,6 +9,7 @@ export const RANGES: [string, number][] = [
   ["6M", 6],
   ["1Y", 12],
   ["3Y", 36],
+  ["5Y", 60],
   ["All", 999],
 ];
 

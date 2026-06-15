@@ -8,6 +8,8 @@ export interface HeroStats {
   fxPct: number;
   neutral: number;
   updated: string;
+  portfolioYield: number;
+  annualIncome: number;
 }
 
 export interface MoverItem {
@@ -51,4 +53,46 @@ export interface PortfolioSeriesPoint {
 export interface FxSeriesPoint {
   [key: string]: number;
   i: number;
+}
+
+export interface AllocationBySource {
+  source: string;
+  valueSGD: number;
+  costSGD: number;
+  pnl: number;
+  count: number;
+}
+
+export interface PortfolioAnalytics {
+  cagr: number;
+  actualSharpe: number;
+  annualisedVol: number;
+  maxDrawdown: number;
+  maxDrawdownDate: string;
+  bestDayReturn: number;
+  bestDayDate: string;
+  worstDayReturn: number;
+  worstDayDate: string;
+  days: number;
+  series: { date: string; value: number; cost: number }[];
+}
+
+export interface CashBalance {
+  currency: string;
+  amount: number;
+}
+
+export interface CpfBalance {
+  oa: number;
+  sa: number;
+  ma: number;
+  ra: number;
+  asAtDate: string;
+}
+
+export interface SourceYield {
+  source: string;
+  yieldPct: number;
+  annualIncome: number;
+  cagr5yr: number | null;
 }

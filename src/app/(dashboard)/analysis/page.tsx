@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { streamSentiment, streamAsk } from "@/lib/api/client/analyst-api";
 import { pct } from "@/lib/formatters";
+import { toNetPositions } from "@/lib/group-holdings";
 import type { HoldingRow } from "@/types/holding";
 
 // shared gold button — matches the converted settings page pattern
@@ -794,12 +795,15 @@ async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
 
 export default function AnalysisPage() {
   const { holdings } = usePortfolio();
-  const key = holdingsKey(holdings);
+  // One card per instrument: net out sells and collapse multi-lot positions so
+  // the same ticker never appears twice.
+  const positions = useMemo(() => toNetPositions(holdings), [holdings]);
+  const key = holdingsKey(positions);
   const cached = SENT_CACHE?.key === key ? SENT_CACHE.data : null;
 
   // Show fallback data immediately — AI runs in background and upgrades the state
   const [data, setData] = useState<AnalysisData>(
-    () => cached ?? buildFallback(holdings),
+    () => cached ?? buildFallback(positions),
   );
   const [aiRunning, setAiRunning] = useState(!cached);
 
@@ -807,10 +811,10 @@ export default function AnalysisPage() {
     setAiRunning(true);
     let res: AnalysisData;
     try {
-      res = await runSentimentAI(holdings);
+      res = await runSentimentAI(positions);
     } catch (err) {
       console.warn("sentiment AI failed, using sample data:", err);
-      res = buildFallback(holdings);
+      res = buildFallback(positions);
     }
     SENT_CACHE = { key, data: res };
     setData(res);
@@ -823,10 +827,10 @@ export default function AnalysisPage() {
     (async () => {
       let res: AnalysisData;
       try {
-        res = await runSentimentAI(holdings);
+        res = await runSentimentAI(positions);
       } catch (err) {
         console.warn("sentiment AI failed, using sample data:", err);
-        res = buildFallback(holdings);
+        res = buildFallback(positions);
       }
       if (live) {
         SENT_CACHE = { key, data: res };
@@ -840,9 +844,6 @@ export default function AnalysisPage() {
     // re-run when the portfolio fingerprint changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-
-  const left = data.items.filter((_, i) => i % 2 === 0);
-  const right = data.items.filter((_, i) => i % 2 === 1);
 
   return (
     <div className="flex flex-col gap-[18px] min-w-0 w-full">
@@ -881,17 +882,23 @@ export default function AnalysisPage() {
       </div>
 
       <Hero overall={data.overall} items={data.items} />
-      <AskBox holdings={holdings} />
-      <div className="flex gap-[18px] items-start max-bp1080:flex-col max-bp768:w-full">
-        <div className="flex-1 flex flex-col gap-[18px] min-w-0">
-          {left.map((it, i) => (
-            <SentCard key={it.id} it={it} delay={0.05 + i * 0.08} />
-          ))}
+      <AskBox holdings={positions} />
+      {/* Two independent columns (masonry): each flows on its own so expanding
+          a card never leaves a gap in the other column. */}
+      <div className="flex items-start gap-[18px] max-bp1080:flex-col max-bp768:w-full">
+        <div className="flex min-w-0 flex-1 flex-col gap-[18px]">
+          {data.items
+            .filter((_, i) => i % 2 === 0)
+            .map((it, i) => (
+              <SentCard key={it.id} it={it} delay={0.05 + i * 0.08} />
+            ))}
         </div>
-        <div className="flex-1 flex flex-col gap-[18px] min-w-0">
-          {right.map((it, i) => (
-            <SentCard key={it.id} it={it} delay={0.09 + i * 0.08} />
-          ))}
+        <div className="flex min-w-0 flex-1 flex-col gap-[18px]">
+          {data.items
+            .filter((_, i) => i % 2 === 1)
+            .map((it, i) => (
+              <SentCard key={it.id} it={it} delay={0.09 + i * 0.08} />
+            ))}
         </div>
       </div>
       {data.source === "sample" && !aiRunning && (

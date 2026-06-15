@@ -1,17 +1,37 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Donut } from "@/components/charts/Donut";
 import { Legend } from "@/components/charts/Legend";
-import { pct } from "@/lib/formatters";
+import { InfoTip } from "@/components/InfoTip";
+import { pct, NF } from "@/lib/formatters";
 import { usePortfolio } from "@/context/portfolio";
 
 const LABEL = "font-ui text-[11px] tracking-[.04em] text-secondary";
 
 export function SummaryRail() {
-  const { hero, assetAllocation, fmtSigned } = usePortfolio();
+  const { hero, assetAllocation, fmtVal, fmtSigned } = usePortfolio();
   const top = assetAllocation[0];
   const fxUp = hero.fxImpact >= 0;
   const dayUp = hero.dayChange >= 0;
+  const invested = hero.total - hero.totalGain;
+
+  // Sharpe lives in the snapshot-derived analytics, not the portfolio context.
+  // Until it resolves (or if there isn't enough history), the metric stays
+  // visually muted rather than showing a misleading zero.
+  const [sharpe, setSharpe] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/portfolio/analytics")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d && d.days >= 2) setSharpe(d.actualSharpe);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <aside className="sticky top-[110px] flex h-[calc(100vh-110px)] flex-[0_0_248px] flex-col gap-4.5 self-start overflow-y-auto border-r border-subtle px-5 py-[22px] max-bp1080:hidden light:border-r-black/[.09]">
@@ -34,7 +54,15 @@ export function SummaryRail() {
 
       <div className="h-px bg-subtle" />
 
+      {/* Group 1 — portfolio value context */}
       <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-0.5">
+          <span className={LABEL}>Total Invested</span>
+          <span className="font-mono text-[17px] font-semibold text-primary max-bp480:text-[15px]">
+            {fmtVal(invested)}
+          </span>
+          <span className="font-ui text-[11px] text-muted">cost basis</span>
+        </div>
         <div className="flex flex-col gap-0.5">
           <span className={LABEL}>Total Gain</span>
           <span
@@ -88,6 +116,48 @@ export function SummaryRail() {
             {pct(hero.dayPct)}
           </span>
         </div>
+      </div>
+
+      <div className="h-px bg-subtle" />
+
+      {/* Group 2 — dividend cash flow */}
+      <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-0.5">
+          <span className={LABEL + " flex items-center gap-1"}>
+            Portfolio Yield
+            <InfoTip text="Estimated annual yield, weighted by position value. Includes auto-derived TTM yields and manual overrides." />
+          </span>
+          <span className="font-mono text-[17px] font-semibold text-gold max-bp480:text-[15px]">
+            {hero.portfolioYield > 0 ? NF(hero.portfolioYield, 2) + "%" : "—"}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className={LABEL + " flex items-center gap-1"}>
+            Annual Income
+            <InfoTip text="Estimated annual dividend income at current yields and position sizes, shown in your base currency." />
+          </span>
+          <span className="font-mono text-[17px] font-semibold text-primary max-bp480:text-[15px]">
+            {hero.annualIncome > 0 ? fmtVal(hero.annualIncome) : "—"}
+          </span>
+        </div>
+      </div>
+
+      <div className="h-px bg-subtle" />
+
+      {/* Group 3 — risk metric (muted until backend resolves Sharpe) */}
+      <div
+        className={
+          "flex flex-col gap-0.5 transition-opacity duration-300 " +
+          (sharpe == null ? "opacity-50" : "opacity-100")
+        }
+      >
+        <span className={LABEL + " flex items-center gap-1"}>
+          Sharpe Ratio
+          <InfoTip text="Annualised risk-adjusted return from your portfolio history, using a 3% risk-free rate. Higher is better; needs at least two days of recorded data." />
+        </span>
+        <span className="font-mono text-[17px] font-semibold text-primary max-bp480:text-[15px]">
+          {sharpe == null ? "—" : NF(sharpe, 2)}
+        </span>
       </div>
 
       <div className="h-px bg-subtle" />

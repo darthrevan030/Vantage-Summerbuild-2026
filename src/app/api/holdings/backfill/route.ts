@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/supabase/guards";
-import { fetchHoldings, fetchSnapshots } from "@/lib/supabase/data";
+import {
+  fetchHoldings,
+  fetchSnapshots,
+  fetchFxRateHistory,
+  upsertFxHistory,
+} from "@/lib/supabase/data";
 import { getProviderFlags } from "@/lib/supabase/app-config";
+import { fetchDailyCloses } from "@/lib/providers/history";
 
 export const maxDuration = 60;
 
@@ -115,22 +121,26 @@ export async function POST() {
   const existingSnapshots = await fetchSnapshots(user.id);
   const existingDates = new Set(existingSnapshots.map((s) => s.recordedDate));
 
-  const missingDates = allDates.filter((d) => !existingDates.has(d));
-  if (missingDates.length === 0)
-    return NextResponse.json({ inserted: 0, skipped: existingDates.size });
+  // Recompute the FULL date range (not just missing dates) so newly added
+  // back-dated lots are reflected in history from their actual trade date.
+  // existingDates is retained only for the response's "skipped" count.
 
   // Unique exchange-listed tickers (not physical "—")
   const equityTickers = [
     ...new Set(holdings.filter((h) => h.ticker !== "—").map((h) => h.ticker)),
   ];
+  const tickerCurrency = Object.fromEntries(
+    holdings.filter((h) => h.ticker !== "—").map((h) => [h.ticker, h.currency]),
+  );
   const currencies = [
     ...new Set(holdings.map((h) => h.currency).filter((c) => c !== "SGD")),
   ];
 
   const providers = await getProviderFlags();
 
-  // Fetch all historical prices in parallel (one call per ticker)
-  const [rawPrices, rawFx] = await Promise.all([
+  // Historical prices use the same provider chain as live: EODHD first…
+  // FX comes from the fx_history cache, fetching only dates we don't already have.
+  const [eodhdPrices, fxCache] = await Promise.all([
     providers.eodhd
       ? Promise.all(
           equityTickers.map(
@@ -143,9 +153,74 @@ export async function POST() {
         ).then(Object.fromEntries)
       : Promise.resolve(Object.fromEntries(equityTickers.map((t) => [t, {}]))),
     providers.frankfurter
-      ? fetchFxHistory(currencies, from, today)
+      ? fetchFxRateHistory()
       : Promise.resolve({} as Record<string, Record<string, number>>),
   ]);
+
+  const rawPrices: Record<string, Record<string, number>> = { ...eodhdPrices };
+
+  // FX cache → only fetch the window not already cached. Historical rates are
+  // immutable, so a warm cache means we just top up recent (and any older) dates.
+  const fxByCcy: Record<string, Record<string, number>> = {};
+  for (const ccy of currencies) fxByCcy[ccy] = { ...(fxCache[ccy] ?? {}) };
+
+  if (providers.frankfurter && currencies.length > 0) {
+    let fetchFrom = today; // always refresh today (its rate is still "live")
+    let fullRefetch = false;
+    for (const ccy of currencies) {
+      const dates = Object.keys(fxByCcy[ccy]);
+      if (dates.length === 0) {
+        fullRefetch = true;
+        break;
+      }
+      let cmin = dates[0];
+      let cmax = dates[0];
+      for (const d of dates) {
+        if (d < cmin) cmin = d;
+        if (d > cmax) cmax = d;
+      }
+      if (cmin > from) {
+        fullRefetch = true; // older history missing (e.g. a new back-dated lot)
+        break;
+      }
+      if (cmax < fetchFrom) fetchFrom = cmax; // need the tail since last cache
+    }
+    if (fullRefetch) fetchFrom = from;
+
+    const fetched = await fetchFxHistory(currencies, fetchFrom, today);
+    const touched = new Set<string>();
+    for (const [date, rates] of Object.entries(fetched)) {
+      for (const ccy of currencies) {
+        if (rates[ccy] !== undefined) {
+          fxByCcy[ccy][date] = rates[ccy];
+          touched.add(ccy);
+        }
+      }
+    }
+    // Persist the freshly merged history so the next rebuild fetches even less
+    await Promise.all(
+      [...touched].map((ccy) => upsertFxHistory(ccy, fxByCcy[ccy])),
+    );
+  }
+
+  // …then Yahoo as a fallback for tickers EODHD missed (or when EODHD is off).
+  if (providers.yahoo ?? true) {
+    const needYahoo = equityTickers.filter(
+      (t) => Object.keys(rawPrices[t] ?? {}).length === 0,
+    );
+    if (needYahoo.length > 0) {
+      const yahooResults = await Promise.all(
+        needYahoo.map(
+          async (t) =>
+            [
+              t,
+              await fetchDailyCloses(t, tickerCurrency[t] ?? "USD", from, today),
+            ] as const,
+        ),
+      );
+      for (const [t, m] of yahooResults) rawPrices[t] = m;
+    }
+  }
 
   // Build fill-forward price maps per ticker
   const prices: Record<string, Record<string, number>> = {};
@@ -157,19 +232,16 @@ export async function POST() {
   // Build fill-forward FX map: date → { USD: 1.35, GBP: 1.70, ... }
   const fx: Record<string, Record<string, number>> = {};
   for (const ccy of currencies) {
-    const sparseCcy: Record<string, number> = {};
-    for (const [date, rates] of Object.entries(rawFx)) {
-      if (rates[ccy] !== undefined) sparseCcy[date] = rates[ccy];
-    }
     const fallbackFx = holdings.find((h) => h.currency === ccy)?.buyFxRate ?? 1;
-    const filled = fillForward(allDates, sparseCcy, fallbackFx);
+    const filled = fillForward(allDates, fxByCcy[ccy] ?? {}, fallbackFx);
     for (const [date, rate] of Object.entries(filled)) {
       if (!fx[date]) fx[date] = {};
       fx[date][ccy] = rate;
     }
   }
 
-  // Build snapshot rows for each missing date
+  // Build a snapshot row for every date in range (full rebuild). The upsert
+  // overwrites existing rows, so back-dated lots get folded into history.
   type SnapshotRow = {
     user_id: string;
     recorded_date: string;
@@ -181,7 +253,7 @@ export async function POST() {
 
   const rows: SnapshotRow[] = [];
 
-  for (const date of missingDates) {
+  for (const date of allDates) {
     const active = holdings.filter((h) => h.buyDate <= date);
     if (active.length === 0) continue;
 

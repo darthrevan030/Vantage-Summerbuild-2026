@@ -8,10 +8,63 @@ import { Icon } from "@/components/Icon";
 import { Select } from "@/components/Select";
 import { Spark } from "@/components/charts/Spark";
 import { Dumbbell } from "@/components/charts/Dumbbell";
-import { pct, rate, NF } from "@/lib/formatters";
+import { pct, rate, NF, ccyFmt } from "@/lib/formatters";
 import { refreshHoldingPrices } from "@/lib/api-client";
-import type { HoldingRow, GroupedHolding } from "@/types/holding";
+import type { HoldingRow, GroupedHolding, AssetType } from "@/types/holding";
+import { FIXED_INCOME_TYPES } from "@/types/holding";
 import { groupHoldings } from "@/lib/group-holdings";
+
+// Day-over-day price move in native currency (currency cancels in the ratio).
+// Returns null when there's no previous close to compare against.
+function dayPctOf(
+  current: number,
+  prev: number | null | undefined,
+): number | null {
+  if (prev == null || prev <= 0) return null;
+  return ((current - prev) / prev) * 100;
+}
+
+// Yield cell: manual override is authoritative ("4.2%"), auto TTM is marked
+// with a tilde ("4.2% ~"), and absence shows an em-dash.
+function YieldCell({
+  manual,
+  auto,
+}: {
+  manual: number | null;
+  auto: number | null;
+}) {
+  if (manual != null)
+    return <span className="text-primary">{NF(manual, 1)}%</span>;
+  if (auto != null)
+    return (
+      <span className="text-secondary" title="Auto-derived trailing 12-month yield">
+        {NF(auto, 1)}% <span className="text-muted">~</span>
+      </span>
+    );
+  return <span className="text-muted">—</span>;
+}
+
+// Day% cell shared by group/lot/flat rows.
+function DayPctCell({
+  current,
+  prev,
+  source,
+}: {
+  current: number;
+  prev: number | null;
+  source: string | null;
+}) {
+  const dp = dayPctOf(current, prev);
+  if (dp == null) return <span className="text-muted">—</span>;
+  return (
+    <span
+      style={{ color: dp > 0 ? "var(--gain)" : dp < 0 ? "var(--loss)" : "var(--text-muted)" }}
+      title={source ? `Previous close from ${source}` : undefined}
+    >
+      {pct(dp)}
+    </span>
+  );
+}
 
 const ASSET_TYPES_EDIT = ["Equity", "ETF", "REIT", "Gold", "RE"];
 const STRAT_LABEL_EDIT: Record<string, string> = {
@@ -35,10 +88,16 @@ const STRAT: Record<string, { label: string; cls: string }> = {
 const STRAT_BASE =
   "whitespace-nowrap rounded-md px-[9px] py-[3px] font-ui text-[11px]";
 
-const TYPES = ["All", "Equity", "ETF", "REIT", "Gold", "RE"] as const;
+const TYPES = ["All", "Equity", "ETF", "REIT", "Bond", "T-Bill", "Gold", "RE"] as const;
+const SOURCES = ["All", "CPF", "SRS", "Cash"] as const;
 
 const SORT_KEYS = [
   "name",
+  "price",
+  "cost",
+  "dayPct",
+  "source",
+  "yield",
   "valueSGD",
   "assetGain",
   "fxGain",
@@ -79,42 +138,112 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   const total = h.assetGain + h.fxGain;
   const assetGainNative = (d.curPx - d.buyPx) * d.buyUnits;
 
-  type Mode = "view" | "edit" | "confirm-delete";
+  type Mode = "view" | "edit" | "confirm-delete" | "sell";
   const [mode, setMode] = useState<Mode>("view");
   const [saving, setSaving] = useState(false);
   const [editForm, setEditForm] = useState({
     name: h.name,
-    ticker: h.ticker,
-    asset_type: h.assetType,
     strategy: h.strategy,
+    source: h.source ?? "",
     units: String(h.units),
-    current_price: String(h.currentPrice),
-    current_fx_rate: String(h.currentFxRate),
+    fees: String(h.fees ?? 0),
     buy_price: String(h.buyPrice),
     buy_date: h.buyDate,
     buy_fx_rate: String(h.buyFxRate),
+    dividend_yield: h.dividendYield != null ? String(h.dividendYield) : "",
+    dividend_unit: "pct", // "pct" = % yield · "dps" = dividend per share
   });
   const ef = editForm;
   const setEf = (k: string, v: string) =>
     setEditForm((f) => ({ ...f, [k]: v }));
 
+  const TODAY_STR = new Date().toISOString().slice(0, 10);
+  const [sellForm, setSellForm] = useState({
+    units: "",
+    price: String(d.curPx || h.buyPrice),
+    date: TODAY_STR,
+    fx: String(d.curFx || h.buyFxRate),
+  });
+  const sf = sellForm;
+  const setSf = (k: string, v: string) =>
+    setSellForm((f) => ({ ...f, [k]: v }));
+  const canSell = h.ticker !== "—";
+
+  async function handleSell() {
+    setSaving(true);
+    try {
+      const units = Number(sf.units);
+      const price = Number(sf.price);
+      if (!(units > 0)) throw new Error("Units to sell must be positive");
+      if (!(price > 0)) throw new Error("Sale price must be positive");
+      const res = await fetch("/api/holdings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: h.ticker,
+          name: h.name,
+          asset_type: h.assetType,
+          broker: h.broker,
+          strategy: h.strategy,
+          units,
+          currency: h.currency,
+          flag: h.flag,
+          icon: h.icon,
+          buy_price: price,
+          buy_date: sf.date,
+          buy_fx_rate: Number(sf.fx) || d.curFx || 1,
+          current_price: d.curPx,
+          current_fx_rate: d.curFx,
+          spark_data: h.sparkData,
+          transaction_type: "sell",
+          source: h.source,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? "Sale failed");
+      }
+      toast.success(`Sold ${units} ${h.name}`);
+      router.refresh();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sale failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
+      // Dividend: stored as % yield. A $/share entry is converted using the
+      // current price (yield% = DPS / price × 100). Empty clears the override.
+      const divRaw = ef.dividend_yield.trim();
+      let dividend_yield: number | null = null;
+      if (divRaw !== "") {
+        const v = Number(divRaw);
+        if (!isNaN(v) && v >= 0) {
+          dividend_yield =
+            ef.dividend_unit === "dps"
+              ? d.curPx > 0
+                ? (v / d.curPx) * 100
+                : v
+              : v;
+        }
+      }
       const res = await fetch(`/api/holdings?id=${h.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: ef.name,
-          ticker: ef.ticker,
-          asset_type: ef.asset_type,
           strategy: ef.strategy,
+          source: ef.source,
           units: Number(ef.units),
-          current_price: Number(ef.current_price),
-          current_fx_rate: Number(ef.current_fx_rate),
+          fees: Number(ef.fees),
           buy_price: Number(ef.buy_price),
           buy_date: ef.buy_date,
           buy_fx_rate: Number(ef.buy_fx_rate),
+          dividend_yield,
         }),
       });
       if (!res.ok) {
@@ -183,22 +312,23 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Ticker
+              Fund Source
             </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              value={ef.ticker}
-              onChange={(e) => setEf("ticker", e.target.value.toUpperCase())}
+            <Select
+              value={ef.source || "None"}
+              options={["None", "Cash", "CPF", "SRS"]}
+              onChange={(v) => setEf("source", v === "None" ? "" : v)}
             />
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Asset Type
+              Fees
             </span>
-            <Select
-              value={ef.asset_type}
-              options={ASSET_TYPES_EDIT}
-              onChange={(v) => setEf("asset_type", v)}
+            <input
+              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+              type="number"
+              value={ef.fees}
+              onChange={(e) => setEf("fees", e.target.value)}
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -262,27 +392,50 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
               onChange={(e) => setEf("buy_fx_rate", e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="col-span-2 flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Current Price
+              Dividend
             </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              type="number"
-              value={ef.current_price}
-              onChange={(e) => setEf("current_price", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
-              Current FX Rate
-            </span>
-            <input
-              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
-              type="number"
-              value={ef.current_fx_rate}
-              onChange={(e) => setEf("current_fx_rate", e.target.value)}
-            />
+            <div className="flex gap-1.5">
+              <input
+                className="w-full flex-1 rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+                type="number"
+                min="0"
+                step="any"
+                placeholder={
+                  h.dividendYieldAuto != null
+                    ? `${NF(h.dividendYieldAuto, 1)}% auto`
+                    : "none"
+                }
+                value={ef.dividend_yield}
+                onChange={(e) => setEf("dividend_yield", e.target.value)}
+              />
+              <div className="flex shrink-0 overflow-hidden rounded-[7px] border border-subtle">
+                {(["pct", "dps"] as const).map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    className={
+                      "cursor-pointer px-2.5 py-[7px] font-ui text-[11.5px] transition-colors duration-150 " +
+                      (ef.dividend_unit === u
+                        ? "bg-wash text-gold"
+                        : "bg-surface text-secondary hover:text-primary")
+                    }
+                    onClick={() => setEf("dividend_unit", u)}
+                  >
+                    {u === "pct" ? "%" : "$/sh"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {ef.dividend_unit === "dps" &&
+              ef.dividend_yield.trim() !== "" &&
+              d.curPx > 0 && (
+                <span className="text-[10px] text-muted">
+                  ≈ {NF((Number(ef.dividend_yield) / d.curPx) * 100, 2)}% at
+                  current price
+                </span>
+              )}
           </div>
         </div>
         <button
@@ -291,6 +444,93 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           disabled={saving}
         >
           {saving ? "Saving…" : "Save Changes"}
+        </button>
+      </div>
+    );
+
+  if (mode === "sell")
+    return (
+      <div className="flex flex-[0_0_300px] flex-col gap-[13px] rounded-[13px] border border-subtle bg-elevated p-4 light:border-black/10 max-bp768:flex-[0_0_280px] max-bp600:flex-[0_0_calc(100vw_-_56px)] animate-reveal">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2.5">
+            <Icon name="down" size={18} style={{ color: "var(--loss)" }} />
+            <div className="font-ui text-[13.5px] font-semibold overflow-hidden text-ellipsis whitespace-nowrap">
+              Sell {h.name}
+            </div>
+          </div>
+          <button
+            className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-loss"
+            onClick={() => setMode("view")}
+          >
+            <Icon name="x" size={15} />
+          </button>
+        </div>
+        <div className="rounded-[8px] border border-subtle bg-surface px-3 py-2 font-ui text-[11.5px] text-secondary">
+          Records a sell transaction that reduces your net position. Cost basis
+          stays at your average buy price.
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+              Units to sell
+            </span>
+            <input
+              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+              type="number"
+              min="0"
+              step="any"
+              placeholder={d.buyUnits.toLocaleString()}
+              value={sf.units}
+              onChange={(e) => setSf("units", e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+              Sale Price ({d.ccy})
+            </span>
+            <input
+              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+              type="number"
+              min="0"
+              step="any"
+              value={sf.price}
+              onChange={(e) => setSf("price", e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+              Sale Date
+            </span>
+            <input
+              className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:[filter:invert(0.65)_brightness(1.4)]"
+              type="date"
+              max={TODAY_STR}
+              value={sf.date}
+              onChange={(e) => setSf("date", e.target.value)}
+            />
+          </div>
+          {d.ccy !== "SGD" && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+                Sale FX Rate
+              </span>
+              <input
+                className="w-full rounded-[7px] border border-subtle bg-surface px-[9px] py-[7px] font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+                type="number"
+                min="0"
+                step="any"
+                value={sf.fx}
+                onChange={(e) => setSf("fx", e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+        <button
+          className="w-full cursor-pointer rounded-[9px] border-none bg-loss p-[9px] font-ui text-[13px] font-semibold text-white transition-[filter] duration-150 hover:brightness-[1.08] disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={handleSell}
+          disabled={saving}
+        >
+          {saving ? "Recording…" : "Confirm Sale"}
         </button>
       </div>
     );
@@ -476,6 +716,15 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
             <Icon name="sliders" size={13} />
             Edit
           </button>
+          {canSell && (
+            <button
+              className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-[rgba(239,68,68,0.35)] hover:text-loss disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setMode("sell")}
+            >
+              <Icon name="down" size={13} />
+              Sell
+            </button>
+          )}
           <button
             className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[9px] border border-subtle bg-transparent p-[9px] font-ui text-[12.5px] font-medium transition-all duration-150 text-secondary hover:border-[rgba(239,68,68,0.35)] hover:text-loss disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => setMode("confirm-delete")}
@@ -495,6 +744,7 @@ export default function HoldingsPage() {
 
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
+  const [sourceFilter, setSourceFilter] = useState("All");
   const [sort, setSort] = useState<{ k: SortKey; dir: 1 | -1 }>({
     k: "totalPct",
     dir: -1,
@@ -506,7 +756,27 @@ export default function HoldingsPage() {
   const [expandedTickers, setExpandedTickers] = useState<Set<string>>(
     new Set(),
   );
+  const [confirmLot, setConfirmLot] = useState<string | null>(null);
+  const [deletingLot, setDeletingLot] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  async function handleDeleteLot(id: string) {
+    setDeletingLot(id);
+    try {
+      const res = await fetch(`/api/holdings?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? "Delete failed");
+      }
+      toast.success("Lot removed");
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeletingLot(null);
+      setConfirmLot(null);
+    }
+  }
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -564,18 +834,23 @@ export default function HoldingsPage() {
     });
 
   function sortVal(
-    item: {
-      name: string;
-      valueSGD: number;
-      assetGain: number;
-      fxGain: number;
-      totalPct: number;
-    },
+    item: HoldingRow | GroupedHolding,
     k: SortKey,
   ): string | number {
     switch (k) {
       case "name":
         return item.name;
+      case "price":
+        return item.currentPrice;
+      case "cost":
+        return "avgBuyPrice" in item ? item.avgBuyPrice : item.buyPrice;
+      case "dayPct":
+        // nulls (no previous close) sink to the bottom of either direction
+        return dayPctOf(item.currentPrice, item.prevPrice) ?? -Infinity;
+      case "source":
+        return item.source || "￿"; // untagged sorts last
+      case "yield":
+        return item.dividendYield ?? item.dividendYieldAuto ?? -Infinity;
       case "valueSGD":
         return item.valueSGD;
       case "assetGain":
@@ -590,8 +865,14 @@ export default function HoldingsPage() {
   const filteredRows = holdings.filter(
     (h) =>
       (typeFilter === "All" || h.assetType === typeFilter) &&
+      (sourceFilter === "All" || (h.source || "") === sourceFilter) &&
       (q === "" || (h.name + h.ticker).toLowerCase().includes(q.toLowerCase())),
   );
+
+  const hasFixedIncome = filteredRows.some((h) =>
+    FIXED_INCOME_TYPES.has(h.assetType as AssetType),
+  );
+  const colCount = hasFixedIncome ? 15 : 14;
 
   const rows = [...filteredRows].sort((a, b) => {
     const va = sortVal(a, sort.k);
@@ -702,6 +983,25 @@ export default function HoldingsPage() {
             </button>
           ))}
         </div>
+        <div className="flex flex-wrap items-center gap-1.5 max-bp768:gap-1">
+          <span className="font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted">
+            Source
+          </span>
+          {SOURCES.map((s) => (
+            <button
+              key={s}
+              className={
+                "cursor-pointer rounded-lg border px-[11px] py-[7px] font-ui text-xs transition-all duration-150 max-bp768:px-2.5 max-bp768:py-1.5 max-bp768:text-[11.5px] " +
+                (sourceFilter === s
+                  ? "border-gold-soft bg-wash text-gold"
+                  : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+              }
+              onClick={() => setSourceFilter(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
         <button
           className={
             "flex cursor-pointer items-center gap-[7px] rounded-[9px] border bg-surface px-[13px] py-2 font-ui text-[12.5px] transition-all duration-150 hover:border-gold-soft hover:text-gold disabled:cursor-not-allowed disabled:opacity-50 " +
@@ -757,6 +1057,20 @@ export default function HoldingsPage() {
               <Th>Type</Th>
               <Th>Broker</Th>
               <Th>Strategy</Th>
+              <Th k="source">Source</Th>
+              <Th k="price" right>
+                Price
+              </Th>
+              <Th k="cost" right>
+                Cost
+              </Th>
+              <Th k="dayPct" right>
+                Day %
+              </Th>
+              <Th k="yield" right>
+                Yield
+              </Th>
+              {hasFixedIncome && <Th right>Maturity</Th>}
               <Th k="valueSGD" right>
                 Value
               </Th>
@@ -845,6 +1159,47 @@ export default function HoldingsPage() {
                           {gStrat.label}
                         </span>
                       </td>
+                      <td className={CELL}>
+                        {group.source ? (
+                          <span className="font-ui text-secondary">
+                            {group.source}
+                          </span>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                      <td className={CELL_R}>
+                        {ccyFmt(group.currentPrice, group.currency, 2)}
+                      </td>
+                      <td className={CELL_R}>
+                        {group.avgBuyPrice > 0 ? (
+                          ccyFmt(group.avgBuyPrice, group.currency, 2)
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                      <td className={CELL_R}>
+                        <DayPctCell
+                          current={group.currentPrice}
+                          prev={group.prevPrice}
+                          source={group.prevPriceSource}
+                        />
+                      </td>
+                      <td className={CELL_R}>
+                        <YieldCell
+                          manual={group.dividendYield}
+                          auto={group.dividendYieldAuto}
+                        />
+                      </td>
+                      {hasFixedIncome && (
+                        <td className={CELL_R}>
+                          {group.maturityDate ? (
+                            group.maturityDate
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className={CELL_R}>{fmtVal(group.valueSGD)}</td>
                       <td
                         className={CELL_R}
@@ -893,6 +1248,7 @@ export default function HoldingsPage() {
 
                   const lotRows = group.lots.map((h) => {
                     const sel = picked.has(h.id);
+                    const isSell = h.transactionType === "sell";
                     const lotTotal = h.assetGain + h.fxGain;
                     const lStrat = STRAT[h.strategy] ?? {
                       label: h.strategy,
@@ -901,7 +1257,9 @@ export default function HoldingsPage() {
                     return (
                       <tr
                         key={h.id}
-                        className={sel ? ROW_LOT_SEL : ROW_LOT_UNSEL}
+                        className={
+                          "group/lot " + (sel ? ROW_LOT_SEL : ROW_LOT_UNSEL)
+                        }
                         onClick={(e) => {
                           e.stopPropagation();
                           toggle(h);
@@ -915,8 +1273,19 @@ export default function HoldingsPage() {
                             <span className="font-ui text-[13px] text-secondary overflow-hidden text-ellipsis whitespace-nowrap">
                               {h.buyDate}
                             </span>
-                            <span className="font-mono text-secondary">
-                              · {h.units.toLocaleString()} units
+                            {isSell && (
+                              <span className="rounded-[4px] bg-[rgba(239,68,68,0.12)] px-1.5 py-px font-ui text-[10px] font-semibold tracking-[.04em] text-loss">
+                                SELL
+                              </span>
+                            )}
+                            <span
+                              className="font-mono"
+                              style={{
+                                color: isSell ? "var(--loss)" : "var(--text-secondary)",
+                              }}
+                            >
+                              · {isSell ? "−" : ""}
+                              {h.units.toLocaleString()} units
                             </span>
                           </div>
                         </td>
@@ -935,39 +1304,135 @@ export default function HoldingsPage() {
                             {lStrat.label}
                           </span>
                         </td>
-                        <td className={LOT_CELL_R}>{fmtVal(h.valueSGD)}</td>
-                        <td
-                          className={LOT_CELL_R}
-                          style={{
-                            color:
-                              h.assetGain >= 0 ? "var(--gain)" : "var(--loss)",
-                          }}
-                        >
-                          {fmtSigned(h.assetGain)}
+                        <td className={LOT_CELL}>
+                          {h.source ? (
+                            <span className="font-ui text-secondary">
+                              {h.source}
+                            </span>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                        <td className={LOT_CELL_R}>
+                          {ccyFmt(h.currentPrice, h.currency, 2)}
+                        </td>
+                        <td className={LOT_CELL_R}>
+                          {isSell ? (
+                            <span className="text-muted">—</span>
+                          ) : (
+                            ccyFmt(h.buyPrice, h.currency, 2)
+                          )}
+                        </td>
+                        <td className={LOT_CELL_R}>
+                          <DayPctCell
+                            current={h.currentPrice}
+                            prev={h.prevPrice}
+                            source={h.prevPriceSource}
+                          />
+                        </td>
+                        <td className={LOT_CELL_R}>
+                          <YieldCell
+                            manual={h.dividendYield}
+                            auto={h.dividendYieldAuto}
+                          />
+                        </td>
+                        {hasFixedIncome && (
+                          <td className={LOT_CELL_R}>
+                            {h.maturityDate ? (
+                              h.maturityDate
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </td>
+                        )}
+                        <td className={LOT_CELL_R}>
+                          {isSell ? (
+                            <span className="text-muted">—</span>
+                          ) : (
+                            fmtVal(h.valueSGD)
+                          )}
                         </td>
                         <td
                           className={LOT_CELL_R}
                           style={{
-                            color:
-                              h.fxGain > 0
+                            color: isSell
+                              ? "var(--text-muted)"
+                              : h.assetGain >= 0
+                                ? "var(--gain)"
+                                : "var(--loss)",
+                          }}
+                        >
+                          {isSell ? "—" : fmtSigned(h.assetGain)}
+                        </td>
+                        <td
+                          className={LOT_CELL_R}
+                          style={{
+                            color: isSell
+                              ? "var(--text-muted)"
+                              : h.fxGain > 0
                                 ? "var(--fx-positive)"
                                 : h.fxGain < 0
                                   ? "var(--fx-negative)"
                                   : "var(--text-muted)",
                           }}
                         >
-                          {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
+                          {isSell || h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
                         </td>
                         <td
                           className={LOT_CELL_R_BOLD}
                           style={{
-                            color:
-                              lotTotal >= 0 ? "var(--gain)" : "var(--loss)",
+                            color: isSell
+                              ? "var(--text-muted)"
+                              : lotTotal >= 0
+                                ? "var(--gain)"
+                                : "var(--loss)",
                           }}
                         >
-                          {pct(h.totalPct)}
+                          {isSell ? "—" : pct(h.totalPct)}
                         </td>
-                        <td className={LOT_CELL} />
+                        <td className={LOT_CELL}>
+                          {confirmLot === h.id ? (
+                            <span
+                              className="inline-flex items-center gap-1.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-loss transition-[color] duration-150 hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Confirm delete"
+                                disabled={deletingLot === h.id}
+                                onClick={() => handleDeleteLot(h.id)}
+                              >
+                                <Icon
+                                  name={deletingLot === h.id ? "loader" : "check"}
+                                  size={13}
+                                  style={
+                                    deletingLot === h.id
+                                      ? { animation: "spin 1s linear infinite" }
+                                      : undefined
+                                  }
+                                />
+                              </button>
+                              <button
+                                className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-primary"
+                                title="Cancel"
+                                onClick={() => setConfirmLot(null)}
+                              >
+                                <Icon name="x" size={13} />
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted opacity-0 transition-[color,opacity] duration-150 hover:text-loss group-hover/lot:opacity-100"
+                              title="Delete this lot"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmLot(h.id);
+                              }}
+                            >
+                              <Icon name="x" size={13} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   });
@@ -976,6 +1441,7 @@ export default function HoldingsPage() {
                 })
               : rows.map((h) => {
                   const sel = picked.has(key(h));
+                  const isSell = h.transactionType === "sell";
                   const total = h.assetGain + h.fxGain;
                   const strat = STRAT[h.strategy] ?? {
                     label: h.strategy,
@@ -998,6 +1464,11 @@ export default function HoldingsPage() {
                           <span className="font-mono text-[10.5px] tracking-[.05em] text-muted">
                             {h.ticker}
                           </span>
+                          {isSell && (
+                            <span className="rounded-[4px] bg-[rgba(239,68,68,0.12)] px-1.5 py-px font-ui text-[10px] font-semibold tracking-[.04em] text-loss">
+                              SELL
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className={CELL}>
@@ -1015,30 +1486,87 @@ export default function HoldingsPage() {
                           {strat.label}
                         </span>
                       </td>
-                      <td className={CELL_R}>{fmtVal(h.valueSGD)}</td>
-                      <td className={CELL_R} style={{ color: "var(--gain)" }}>
-                        {fmtSigned(h.assetGain)}
+                      <td className={CELL}>
+                        {h.source ? (
+                          <span className="font-ui text-secondary">
+                            {h.source}
+                          </span>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                      <td className={CELL_R}>
+                        {ccyFmt(h.currentPrice, h.currency, 2)}
+                      </td>
+                      <td className={CELL_R}>
+                        {isSell ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          ccyFmt(h.buyPrice, h.currency, 2)
+                        )}
+                      </td>
+                      <td className={CELL_R}>
+                        <DayPctCell
+                          current={h.currentPrice}
+                          prev={h.prevPrice}
+                          source={h.prevPriceSource}
+                        />
+                      </td>
+                      <td className={CELL_R}>
+                        <YieldCell
+                          manual={h.dividendYield}
+                          auto={h.dividendYieldAuto}
+                        />
+                      </td>
+                      {hasFixedIncome && (
+                        <td className={CELL_R}>
+                          {h.maturityDate ? (
+                            h.maturityDate
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                      )}
+                      <td className={CELL_R}>
+                        {isSell ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          fmtVal(h.valueSGD)
+                        )}
                       </td>
                       <td
                         className={CELL_R}
                         style={{
-                          color:
-                            h.fxGain > 0
+                          color: isSell ? "var(--text-muted)" : "var(--gain)",
+                        }}
+                      >
+                        {isSell ? "—" : fmtSigned(h.assetGain)}
+                      </td>
+                      <td
+                        className={CELL_R}
+                        style={{
+                          color: isSell
+                            ? "var(--text-muted)"
+                            : h.fxGain > 0
                               ? "var(--fx-positive)"
                               : h.fxGain < 0
                                 ? "var(--fx-negative)"
                                 : "var(--text-muted)",
                         }}
                       >
-                        {h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
+                        {isSell || h.fxGain === 0 ? "—" : fmtSigned(h.fxGain)}
                       </td>
                       <td
                         className={CELL_R_BOLD}
                         style={{
-                          color: total >= 0 ? "var(--gain)" : "var(--loss)",
+                          color: isSell
+                            ? "var(--text-muted)"
+                            : total >= 0
+                              ? "var(--gain)"
+                              : "var(--loss)",
                         }}
                       >
-                        {pct(h.totalPct)}
+                        {isSell ? "—" : pct(h.totalPct)}
                       </td>
                       <td className={CELL}>
                         <span className="text-xs whitespace-nowrap">
@@ -1055,7 +1583,7 @@ export default function HoldingsPage() {
               <tr>
                 <td
                   className="text-[13px]"
-                  colSpan={9}
+                  colSpan={colCount}
                   style={{ textAlign: "center", padding: "32px 0" }}
                 >
                   <span className="font-ui text-secondary">

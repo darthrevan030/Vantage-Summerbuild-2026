@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Icon } from "@/components/Icon";
 
 interface SelectProps {
@@ -8,19 +8,50 @@ interface SelectProps {
   onChange: (v: string) => void;
 }
 
+// Lists longer than this get an inline search box.
+const SEARCH_THRESHOLD = 6;
+
 export function Select({ value, options, onChange }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const openDrop = useCallback(() => {
+  const showSearch = options.length > SEARCH_THRESHOLD;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q === "" ? options : options.filter((o) => o.toLowerCase().includes(q));
+  }, [options, query]);
+
+  // Anchor the (fixed-positioned) dropdown to the trigger. Recomputed on every
+  // scroll/resize so it tracks the field instead of detaching when the page or
+  // a scrollable card moves underneath it (the mobile bug).
+  const place = useCallback(() => {
     const r = triggerRef.current?.getBoundingClientRect();
     if (!r) return;
-    setDropStyle({ top: r.bottom + 4, left: r.left, width: r.width });
-    setOpen(true);
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(
+      140,
+      Math.min(300, (openUp ? spaceAbove : spaceBelow) - 12),
+    );
+    setDropStyle(
+      openUp
+        ? { bottom: window.innerHeight - r.top + 4, left: r.left, width: r.width, maxHeight }
+        : { top: r.bottom + 4, left: r.left, width: r.width, maxHeight },
+    );
   }, []);
 
+  const openDrop = useCallback(() => {
+    setQuery("");
+    place();
+    setOpen(true);
+  }, [place]);
+
+  // Close on outside click; reposition on scroll/resize while open.
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
@@ -29,8 +60,25 @@ export function Select({ value, options, onChange }: SelectProps) {
         setOpen(false);
     };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
+    // capture:true catches scrolls of nested/overflowing containers (cards) too
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
+
+  // Focus the search box when a searchable dropdown opens.
+  useEffect(() => {
+    if (open && showSearch) searchRef.current?.focus();
+  }, [open, showSearch]);
+
+  const choose = (o: string) => {
+    onChange(o);
+    setOpen(false);
+  };
 
   return (
     <div className="relative w-full">
@@ -59,29 +107,53 @@ export function Select({ value, options, onChange }: SelectProps) {
       {open && (
         <div
           ref={dropRef}
-          className="fixed z-[9999] overflow-hidden rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
+          className="fixed z-[9999] flex flex-col rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
           style={dropStyle}
         >
-          {options.map((o) => (
-            <button
-              key={o}
-              type="button"
-              className={
-                "block w-full cursor-pointer whitespace-nowrap rounded-[7px] px-[11px] py-2 text-left font-flag text-[13px] transition-[background,color] duration-100 hover:bg-elevated hover:text-primary " +
-                (o === value ? "text-gold" : "text-secondary")
-              }
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={() => {
-                onChange(o);
-                setOpen(false);
-              }}
-            >
-              {o}
-            </button>
-          ))}
+          {showSearch && (
+            <div className="shrink-0 p-1">
+              <input
+                ref={searchRef}
+                type="text"
+                value={query}
+                placeholder="Search…"
+                className="w-full rounded-[7px] border border-subtle bg-elevated px-[10px] py-1.5 font-ui text-[12.5px] text-primary outline-none transition-[border-color] duration-150 placeholder:text-muted focus:border-gold-soft"
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setOpen(false);
+                  else if (e.key === "Enter" && filtered.length > 0) {
+                    e.preventDefault();
+                    choose(filtered[0]);
+                  }
+                }}
+              />
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-[11px] py-3 text-center font-ui text-[12.5px] text-muted">
+                No matches
+              </div>
+            ) : (
+              filtered.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  className={
+                    "block w-full cursor-pointer whitespace-nowrap rounded-[7px] px-[11px] py-2 text-left font-flag text-[13px] transition-[background,color] duration-100 hover:bg-elevated hover:text-primary " +
+                    (o === value ? "text-gold" : "text-secondary")
+                  }
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onClick={() => choose(o)}
+                >
+                  {o}
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>

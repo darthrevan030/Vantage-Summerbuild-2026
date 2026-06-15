@@ -9,9 +9,19 @@ import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 
-const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE"];
+const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
 
 const PHYSICAL_TYPES = new Set(["Gold", "RE"]);
+const FIXED_INCOME_TYPES = new Set(["Bond", "T-Bill"]);
+
+// Fund-source options (maps the human label ↔ the value the API expects)
+const SOURCE_LABEL: Record<string, string> = {
+  "": "— None",
+  Cash: "Cash",
+  CPF: "CPF",
+  SRS: "SRS",
+};
+const TXN_LABEL: Record<string, string> = { buy: "Buy", sell: "Sell" };
 
 const STRAT_LABEL: Record<string, string> = {
   long_term: "Long Term",
@@ -37,6 +47,8 @@ const TYPE_ICON: Record<string, string> = {
   REIT: "landmark",
   Gold: "gem",
   RE: "building",
+  Bond: "landmark",
+  "T-Bill": "landmark",
 };
 
 // ---- reusable field primitive ----
@@ -115,13 +127,275 @@ const EMPTY_FORM = {
   buy_date: TODAY,
   buy_fx_rate: "",
   notes: "",
+  // SGX / lot fields
+  transaction_type: "buy",
+  source: "",
+  fees: "",
+  dividend_yield: "",
+  dividend_unit: "pct", // "pct" = % yield · "dps" = dividend per share
+  // Fixed-income (Bond / T-Bill) fields
+  maturity_date: "",
+  par_value: "",
+  coupon_rate: "",
 };
 
+// ---- CPF balance editor ----
+// CPF isn't a tradable instrument — OA/SA/MA/RA are running balances on one
+// account, snapshotted at a date. So this writes to cpf_balances via /api/cpf,
+// not to holdings. Existing balances preload so you edit rather than overwrite.
+const CPF_ACCOUNTS: [keyof typeof EMPTY_CPF, string, string][] = [
+  ["oa", "Ordinary Account (OA)", "45000"],
+  ["sa", "Special Account (SA)", "28000"],
+  ["ma", "MediSave (MA)", "12500"],
+  ["ra", "Retirement Account (RA)", "0"],
+];
+const EMPTY_CPF = { oa: "", sa: "", ma: "", ra: "", asAtDate: TODAY };
+
+function CpfForm() {
+  const router = useRouter();
+  const [form, setForm] = useState(EMPTY_CPF);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k: keyof typeof form, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/cpf")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d?.balances) {
+          const b = d.balances;
+          setForm({
+            oa: b.oa ? String(b.oa) : "",
+            sa: b.sa ? String(b.sa) : "",
+            ma: b.ma ? String(b.ma) : "",
+            ra: b.ra ? String(b.ra) : "",
+            asAtDate: b.asAtDate || TODAY,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleSubmit = async () => {
+    setError("");
+    const num = (v: string) => (v.trim() === "" ? 0 : parseFloat(v));
+    const vals = { oa: num(form.oa), sa: num(form.sa), ma: num(form.ma), ra: num(form.ra) };
+    if (Object.values(vals).some((n) => isNaN(n) || n < 0)) {
+      const msg = "Balances must be zero or positive.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    if (vals.oa + vals.sa + vals.ma + vals.ra <= 0) {
+      const msg = "Enter at least one balance.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/cpf", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...vals, asAtDate: form.asAtDate }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Save failed");
+      }
+      toast.success("CPF balances saved");
+      setForm(EMPTY_CPF);
+      router.refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
+      {CPF_ACCOUNTS.map(([k, label, ph]) => (
+        <Field key={k} label={label}>
+          <input
+            className="inp"
+            type="number"
+            min="0"
+            step="any"
+            placeholder={ph}
+            value={form[k]}
+            onChange={(e) => set(k, e.target.value)}
+          />
+        </Field>
+      ))}
+      <Field label="As at date" full>
+        <input
+          className="inp"
+          type="date"
+          max={TODAY}
+          value={form.asAtDate}
+          onChange={(e) => set("asAtDate", e.target.value)}
+        />
+      </Field>
+      {error && (
+        <div
+          className="font-ui"
+          style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}
+        >
+          {error}
+        </div>
+      )}
+      <button
+        className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+        onClick={handleSubmit}
+        disabled={saving}
+      >
+        <Icon name="plus" size={16} />
+        {saving ? "Saving…" : "Save CPF Balances"}
+      </button>
+    </div>
+  );
+}
+
+// ---- Cash balance editor ----
+// Plain cash per currency → cash_balances via /api/cash (one currency at a
+// time). Existing balances are listed so the user has context; picking a
+// currency that already has a value preloads the amount for editing.
+function CashForm() {
+  const router = useRouter();
+  const currencies = useCurrencies();
+  const [existing, setExisting] = useState<
+    { currency: string; amount: number }[]
+  >([]);
+  const [currency, setCurrency] = useState("SGD");
+  const [amount, setAmount] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = () =>
+    fetch("/api/cash")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setExisting(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+
+  const pickCurrency = (c: string) => {
+    setCurrency(c);
+    const ex = existing.find((r) => r.currency === c);
+    setAmount(ex ? String(ex.amount) : "");
+  };
+
+  const handleSubmit = async () => {
+    setError("");
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt < 0) {
+      const msg = "Amount must be zero or positive.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/cash", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currency, amount: amt }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Save failed");
+      }
+      toast.success(`${currency} cash balance saved`);
+      setAmount("");
+      await load();
+      router.refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
+      <Field label="Currency">
+        <Select
+          value={CCY_FLAGS[currency] + " " + currency}
+          options={currencies.map((c) => (CCY_FLAGS[c] ?? "🌐") + " " + c)}
+          onChange={(v) => pickCurrency(v.split(" ")[1])}
+        />
+      </Field>
+      <Field label="Amount">
+        <input
+          className="inp"
+          type="number"
+          min="0"
+          step="any"
+          placeholder="10000"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+      </Field>
+      {existing.length > 0 && (
+        <div className="col-span-full flex flex-wrap gap-2">
+          {existing.map((c) => (
+            <span
+              key={c.currency}
+              className="flex items-center gap-1.5 rounded-[9px] border border-subtle bg-elevated px-2.5 py-1.5 font-mono text-[12px] text-secondary"
+            >
+              {c.currency} {c.amount.toLocaleString()}
+            </span>
+          ))}
+        </div>
+      )}
+      {error && (
+        <div
+          className="font-ui"
+          style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}
+        >
+          {error}
+        </div>
+      )}
+      <button
+        className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+        onClick={handleSubmit}
+        disabled={saving}
+      >
+        <Icon name="plus" size={16} />
+        {saving ? "Saving…" : "Save Cash Balance"}
+      </button>
+    </div>
+  );
+}
+
 // ---- manual entry form ----
+const ENTRY_TYPES: [string, string][] = [
+  ["holding", "Holding"],
+  ["cpf", "CPF"],
+  ["cash", "Cash"],
+];
+const ENTRY_SUBTITLE: Record<string, string> = {
+  holding: "add a position",
+  cpf: "update CPF balances",
+  cash: "update cash balances",
+};
+
 function ManualForm() {
   const router = useRouter();
   const currencies = useCurrencies();
   const exchanges = useExchanges();
+  const [entryType, setEntryType] = useState("holding");
   const [form, setForm] = useState(EMPTY_FORM);
   const [fetchingFx, setFetchingFx] = useState(false);
   const [fxAuto, setFxAuto] = useState(false);
@@ -217,6 +491,19 @@ function ManualForm() {
           : baseTicker;
 
       const fxRate = parseFloat(form.buy_fx_rate || "1") || 1;
+      const isFixedIncome = FIXED_INCOME_TYPES.has(form.asset_type);
+      const num = (v: string) => (v.trim() === "" ? null : parseFloat(v));
+      // Dividend stored as % yield; a $/share entry converts via the buy price
+      // (yield% = DPS / price × 100), which is the current price for a new lot.
+      const divNum = num(form.dividend_yield);
+      const dividendYield =
+        divNum == null
+          ? null
+          : form.dividend_unit === "dps"
+            ? buy_price > 0
+              ? (divNum / buy_price) * 100
+              : divNum
+            : divNum;
       const payload = {
         ticker: tickerWithExchange,
         name: form.name.trim(),
@@ -234,6 +521,15 @@ function ManualForm() {
         current_fx_rate: fxRate,
         spark_data: [buy_price],
         notes: form.notes || null,
+        // Lot fields
+        transaction_type: form.transaction_type,
+        source: form.source,
+        fees: num(form.fees) ?? 0,
+        dividend_yield: dividendYield,
+        // Fixed-income instrument fields (only sent for Bond / T-Bill)
+        maturity_date: isFixedIncome ? form.maturity_date || null : null,
+        par_value: isFixedIncome ? num(form.par_value) : null,
+        coupon_rate: isFixedIncome ? num(form.coupon_rate) : null,
       };
       const res = await fetch("/api/holdings", {
         method: "POST",
@@ -264,10 +560,31 @@ function ManualForm() {
           Manual Entry
         </span>
         <span className="font-ui text-secondary text-[11px]">
-          add a position
+          {ENTRY_SUBTITLE[entryType]}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
+      <div className="mb-4 flex gap-1.5">
+        {ENTRY_TYPES.map(([val, label]) => (
+          <button
+            key={val}
+            className={
+              "cursor-pointer rounded-lg border px-[13px] py-[7px] font-ui text-xs transition-all duration-150 " +
+              (entryType === val
+                ? "border-gold-soft bg-wash text-gold"
+                : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+            }
+            onClick={() => setEntryType(val)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {entryType === "cpf" && <CpfForm />}
+      {entryType === "cash" && <CashForm />}
+
+      {entryType === "holding" && (
+        <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
         <Field label="Asset Name" full>
           <input
             className="inp"
@@ -416,6 +733,115 @@ function ManualForm() {
             </button>
           </div>
         </Field>
+        <Field label="Transaction">
+          <Select
+            value={TXN_LABEL[form.transaction_type]}
+            options={Object.values(TXN_LABEL)}
+            onChange={(v) => set("transaction_type", v === "Sell" ? "sell" : "buy")}
+          />
+        </Field>
+        <Field label="Fund Source">
+          <Select
+            value={SOURCE_LABEL[form.source]}
+            options={Object.values(SOURCE_LABEL)}
+            onChange={(v) =>
+              set(
+                "source",
+                Object.entries(SOURCE_LABEL).find(([, lbl]) => lbl === v)?.[0] ??
+                  "",
+              )
+            }
+          />
+        </Field>
+        <Field label="Fees">
+          <input
+            className="inp"
+            type="number"
+            placeholder="0"
+            min="0"
+            step="any"
+            value={form.fees}
+            onChange={(e) => set("fees", e.target.value)}
+          />
+        </Field>
+        <Field label="Dividend (optional)">
+          <div className="flex gap-1.5">
+            <input
+              className="inp flex-1"
+              type="number"
+              placeholder={form.dividend_unit === "dps" ? "0.42" : "auto"}
+              min="0"
+              step="any"
+              value={form.dividend_yield}
+              onChange={(e) => set("dividend_yield", e.target.value)}
+            />
+            <div className="flex shrink-0 overflow-hidden rounded-[8px] border border-subtle">
+              {(["pct", "dps"] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  className={
+                    "cursor-pointer px-2.5 py-1.5 font-ui text-[11.5px] transition-colors duration-150 " +
+                    (form.dividend_unit === u
+                      ? "bg-wash text-gold"
+                      : "bg-surface text-secondary hover:text-primary")
+                  }
+                  onClick={() => set("dividend_unit", u)}
+                >
+                  {u === "pct" ? "%" : "$/sh"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.dividend_unit === "dps" &&
+            form.dividend_yield.trim() !== "" &&
+            parseFloat(form.buy_price) > 0 && (
+              <span className="font-ui text-[10.5px] text-muted">
+                ≈{" "}
+                {(
+                  (parseFloat(form.dividend_yield) / parseFloat(form.buy_price)) *
+                  100
+                ).toFixed(2)}
+                % at this price
+              </span>
+            )}
+        </Field>
+
+        {FIXED_INCOME_TYPES.has(form.asset_type) && (
+          <>
+            <Field label="Maturity Date">
+              <input
+                className="inp"
+                type="date"
+                value={form.maturity_date}
+                onChange={(e) => set("maturity_date", e.target.value)}
+              />
+            </Field>
+            <Field label="Par Value">
+              <input
+                className="inp"
+                type="number"
+                placeholder="100"
+                min="0"
+                step="any"
+                value={form.par_value}
+                onChange={(e) => set("par_value", e.target.value)}
+              />
+            </Field>
+            <Field label="Coupon Rate %">
+              <input
+                className="inp"
+                type="number"
+                placeholder="3.5"
+                min="0"
+                step="any"
+                value={form.coupon_rate}
+                onChange={(e) => set("coupon_rate", e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+
         <Field label="Notes" full>
           <input
             className="inp"
@@ -442,7 +868,8 @@ function ManualForm() {
           <Icon name="plus" size={16} />
           {saving ? "Saving…" : "Add Holding"}
         </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

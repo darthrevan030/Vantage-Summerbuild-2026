@@ -45,6 +45,7 @@ export function FXArea({
 }: FXAreaProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(640);
+  const [hover, setHover] = useState<number | null>(null);
 
   useEffect(() => {
     const ro = new ResizeObserver((e) => setW(e[0].contentRect.width));
@@ -81,6 +82,14 @@ export function FXArea({
     y: padT + (g / Y_TICKS) * ih,
   }));
 
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    let i = Math.round(((x - padL) / iw) * (data.length - 1));
+    i = Math.max(0, Math.min(data.length - 1, i));
+    setHover(i);
+  };
+
   const maxXTicks = Math.max(2, Math.floor(iw / 64));
   const xStep = Math.ceil((data.length - 1) / (maxXTicks - 1));
   const xTicks = data
@@ -90,7 +99,12 @@ export function FXArea({
 
   return (
     <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
-      <svg width={w} height={height}>
+      <svg
+        width={w}
+        height={height}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
         <defs>
           {keys.map((k) => (
             <linearGradient key={k} id={"fx" + k} x1="0" y1="0" x2="0" y2="1">
@@ -180,7 +194,60 @@ export function FXArea({
               </text>
             );
           })}
+
+        {/* Hover crosshair + per-series markers */}
+        {hover != null && (
+          <g>
+            <line
+              x1={X(hover)}
+              x2={X(hover)}
+              y1={padT}
+              y2={padT + ih}
+              stroke="var(--text-muted)"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+              opacity="0.5"
+            />
+            {keys.map((k) => (
+              <circle
+                key={k}
+                cx={X(hover)}
+                cy={Y(data[hover][k])}
+                r="3.5"
+                fill={colors[k]}
+                stroke="var(--bg-base)"
+                strokeWidth="2"
+              />
+            ))}
+          </g>
+        )}
       </svg>
+      {hover != null && (
+        <div
+          className="pointer-events-none absolute z-[5] -translate-x-1/2 rounded-lg border border-gold-soft bg-base px-[11px] py-[7px] shadow-[0_6px_24px_rgba(0,0,0,.5)] light:bg-surface light:shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+          style={{ left: Math.min(Math.max(X(hover), 70), w - 70), top: padT }}
+        >
+          {labels && labels[hover] && (
+            <div className="font-ui text-[10px] uppercase tracking-[.06em] text-muted">
+              {fmtTick(labels[hover])}
+            </div>
+          )}
+          {keys.map((k) => (
+            <div
+              key={k}
+              className="mt-0.5 flex items-center gap-1.5 font-mono text-[12px] font-semibold"
+              style={{ color: colors[k] }}
+            >
+              <span
+                className="inline-block size-2 rounded-[2px]"
+                style={{ background: colors[k] }}
+              />
+              {k.toUpperCase()}{" "}
+              {valFmt ? valFmt(data[hover][k]) : data[hover][k]}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
