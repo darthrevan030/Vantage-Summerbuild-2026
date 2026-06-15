@@ -7,6 +7,7 @@ import {
   updateLot,
   updateInstrumentForLot,
   upsertHoldingOverride,
+  upsertHoldingOverrideForLot,
   seedTickerQuote,
 } from "@/lib/supabase/data";
 import { requireAuth } from "@/lib/supabase/guards";
@@ -257,9 +258,28 @@ export async function PATCH(req: NextRequest) {
   if (lotPatch.quantity !== undefined && Number(lotPatch.quantity) <= 0)
     return NextResponse.json({ error: "invalid units" }, { status: 400 });
 
+  // Dividend-yield override (per user + instrument). null clears it.
+  const hasDividend = body.dividend_yield !== undefined;
+  if (
+    hasDividend &&
+    body.dividend_yield !== null &&
+    !finiteNonNeg(body.dividend_yield)
+  )
+    return NextResponse.json({ error: "invalid dividend_yield" }, { status: 400 });
+
   // Apply instrument edits first (ownership-checked), then lot edits
   if (Object.keys(instPatch).length > 0) {
     const ok = await updateInstrumentForLot(id, user.id, instPatch);
+    if (!ok)
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  }
+
+  if (hasDividend) {
+    const ok = await upsertHoldingOverrideForLot(
+      id,
+      user.id,
+      body.dividend_yield === null ? null : Number(body.dividend_yield),
+    );
     if (!ok)
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }

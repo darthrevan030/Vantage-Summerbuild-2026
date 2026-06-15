@@ -72,6 +72,7 @@ export interface GroupedHolding {
   fxGain: number;
   totalPct: number;
   currentPrice: number;
+  avgBuyPrice: number;
   sparkData: number[];
   // Derived from lots (first lot wins for per-ticker fields)
   source: string;

@@ -6,9 +6,10 @@ import { Donut } from "@/components/charts/Donut";
 import { Legend } from "@/components/charts/Legend";
 import { AreaTrend } from "@/components/charts/AreaTrend";
 import { FXArea } from "@/components/charts/FXArea";
-import { pct, ccySigned } from "@/lib/formatters";
-import type { FxSeriesPoint } from "@/types/portfolio";
+import { pct, ccySigned, NF } from "@/lib/formatters";
+import type { FxSeriesPoint, PortfolioAnalytics } from "@/types/portfolio";
 import { useDateRange, RANGES_DAILY } from "@/lib/useDateRange";
+import { toNetPositions } from "@/lib/group-holdings";
 import { InfoTip } from "@/components/InfoTip";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -235,7 +236,7 @@ function PortfolioTrend() {
 
 function PerfBars() {
   const { holdings } = usePortfolio();
-  const rows = [...holdings]
+  const rows = toNetPositions(holdings)
     .map((h) => ({ name: h.name, ticker: h.ticker, pct: h.totalPct }))
     .sort((a, b) => b.pct - a.pct);
   const max = Math.max(...rows.map((r) => Math.abs(r.pct)), 1);
@@ -474,12 +475,109 @@ function FXImpactCard() {
   );
 }
 
+function MetricCard({
+  label,
+  value,
+  color,
+  sub,
+  tip,
+}: {
+  label: string;
+  value: React.ReactNode;
+  color?: string;
+  sub?: string;
+  tip?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3">
+      <span className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">
+        {label}
+        {tip && <InfoTip text={tip} />}
+      </span>
+      <span
+        className="font-mono text-[20px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[17px] max-bp480:text-[15px]"
+        style={color ? { color } : undefined}
+      >
+        {value}
+      </span>
+      {sub && (
+        <span className="font-ui text-[11px] text-secondary">{sub}</span>
+      )}
+    </div>
+  );
+}
+
+function AnalyticsCards() {
+  const [a, setA] = useState<PortfolioAnalytics | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/portfolio/analytics")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && setA(d))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Needs at least two distinct-date snapshots to derive any return series.
+  if (!a || a.days < 2) return null;
+
+  const gl = (n: number) => (n >= 0 ? "var(--gain)" : "var(--loss)");
+
+  return (
+    <div className="grid grid-cols-5 gap-3.5 animate-reveal max-bp1080:grid-cols-3 max-bp600:grid-cols-2">
+      <MetricCard
+        label="CAGR"
+        value={pct(a.cagr)}
+        color={gl(a.cagr)}
+        sub="annualised growth"
+        tip="Compound annual growth rate of portfolio value over the full recorded span."
+      />
+      <MetricCard
+        label="Sharpe"
+        value={NF(a.actualSharpe, 2)}
+        color={gl(a.actualSharpe)}
+        sub="risk-adjusted return"
+        tip="Annualised excess return per unit of volatility, using a 3% risk-free rate."
+      />
+      <MetricCard
+        label="Volatility"
+        value={NF(a.annualisedVol, 1) + "%"}
+        sub="annualised"
+        tip="Annualised standard deviation of daily portfolio returns."
+      />
+      <MetricCard
+        label="Max Drawdown"
+        value={pct(a.maxDrawdown)}
+        color="var(--loss)"
+        sub={a.maxDrawdownDate || "peak-to-trough"}
+        tip="Deepest peak-to-trough decline in portfolio value over the recorded history."
+      />
+      <MetricCard
+        label="Best / Worst Day"
+        value={
+          <span>
+            <span style={{ color: "var(--gain)" }}>{pct(a.bestDayReturn)}</span>
+            <span className="text-muted"> / </span>
+            <span style={{ color: "var(--loss)" }}>{pct(a.worstDayReturn)}</span>
+          </span>
+        }
+        sub="single-day return"
+        tip="Largest single-day gain and loss between consecutive snapshots."
+      />
+    </div>
+  );
+}
+
 export default function ChartsPage() {
   const { hero, assetAllocation, fmtVal } = usePortfolio();
   const [hl, setHl] = useState(-1);
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-[18px]">
+      <AnalyticsCards />
       <div className="grid grid-cols-2 gap-[18px] max-bp1080:grid-cols-1 max-bp768:w-full">
         <PortfolioTrend />
 

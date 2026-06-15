@@ -418,6 +418,26 @@ export async function updateInstrumentForLot(
   return true;
 }
 
+// Set/clear a per-user dividend-yield override via a lot the caller owns. The
+// ownership check (lot belongs to userId) resolves the instrument so a user can
+// only override yields for instruments they actually hold. null clears it.
+export async function upsertHoldingOverrideForLot(
+  lotId: string,
+  userId: string,
+  dividendYield: number | null,
+): Promise<boolean> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("lots")
+    .select("instrument_id")
+    .eq("id", lotId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return false;
+  await upsertHoldingOverride(userId, data.instrument_id as string, dividendYield);
+  return true;
+}
+
 export async function deleteLot(id: string, userId: string): Promise<void> {
   const supabase = await makeServerClient();
   // Scope by id AND user_id — prevents IDOR. The instrument row is left intact

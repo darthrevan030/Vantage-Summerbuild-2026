@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/guards";
 import { fetchCpfBalances, upsertCpfBalances } from "@/lib/supabase/data";
+import { getCpfLifeRates } from "@/lib/supabase/app-config";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const NUM_MAX = 1e12;
@@ -12,8 +13,11 @@ const finiteNonNeg = (v: unknown) => {
 export async function GET() {
   const { user, error } = await requireAuth();
   if (error) return error;
-  const balances = await fetchCpfBalances(user.id);
-  return NextResponse.json(balances);
+  const [balances, lifeRates] = await Promise.all([
+    fetchCpfBalances(user.id),
+    getCpfLifeRates(),
+  ]);
+  return NextResponse.json({ balances, lifeRates });
 }
 
 export async function PATCH(req: NextRequest) {

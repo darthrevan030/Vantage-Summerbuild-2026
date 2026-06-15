@@ -16,6 +16,7 @@ import {
   computeAssetGainSGD,
   computeFxGainSGD,
 } from "./fx";
+import { toNetPositions } from "./group-holdings";
 
 const PAL = ["#b79cff", "#5fd0c6", "#6fb0ff", "#f4a6cf", "#8b8bff", "#f0bd8a"];
 
@@ -63,11 +64,13 @@ export function computeHeroStats(
   holdings: HoldingRow[],
   snapshots: SnapshotRow[] = [],
 ): HeroStats {
-  const total = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  const cost = holdings.reduce((s, h) => s + h.costSGD, 0);
+  // Net out sells so totals reflect what's actually held, not gross lots.
+  const positions = toNetPositions(holdings);
+  const total = positions.reduce((s, h) => s + h.valueSGD, 0);
+  const cost = positions.reduce((s, h) => s + h.costSGD, 0);
   const totalGain = total - cost;
   const totalGainPct = cost > 0 ? (totalGain / cost) * 100 : 0;
-  const fxImpact = holdings.reduce((s, h) => s + h.fxGain, 0);
+  const fxImpact = positions.reduce((s, h) => s + h.fxGain, 0);
   const fxPct = cost > 0 ? (fxImpact / cost) * 100 : 0;
   const neutral = total - fxImpact;
 
@@ -80,7 +83,7 @@ export function computeHeroStats(
   // Portfolio yield and annual income (weighted by SGD value)
   let yieldedValue = 0;
   let annualIncome = 0;
-  for (const h of holdings) {
+  for (const h of positions) {
     const y = h.dividendYield ?? h.dividendYieldAuto;
     if (y != null) {
       yieldedValue += h.valueSGD;
@@ -105,8 +108,9 @@ export function computeHeroStats(
 }
 
 export function computeAllocationBySource(holdings: HoldingRow[]): AllocationBySource[] {
+  const positions = toNetPositions(holdings);
   const map = new Map<string, { valueSGD: number; costSGD: number; count: number }>();
-  for (const h of holdings) {
+  for (const h of positions) {
     const key = h.source || "Untagged";
     const bucket = map.get(key) ?? { valueSGD: 0, costSGD: 0, count: 0 };
     bucket.valueSGD += h.valueSGD;
@@ -247,9 +251,10 @@ export function computePortfolioAnalytics(
 export function computeAllocationByAsset(
   holdings: HoldingRow[],
 ): AllocationSlice[] {
+  const positions = toNetPositions(holdings);
   const totals: Record<string, number> = {};
-  const grandTotal = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  for (const h of holdings) {
+  const grandTotal = positions.reduce((s, h) => s + h.valueSGD, 0);
+  for (const h of positions) {
     totals[h.assetType] = (totals[h.assetType] ?? 0) + h.valueSGD;
   }
   return Object.entries(totals).map(([label, value], i) => ({
@@ -282,9 +287,10 @@ export function computeAllocationByGeo(
     NOK: "Norway",
     DKK: "Denmark",
   };
+  const positions = toNetPositions(holdings);
   const totals: Record<string, number> = {};
-  const grandTotal = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  for (const h of holdings) {
+  const grandTotal = positions.reduce((s, h) => s + h.valueSGD, 0);
+  for (const h of positions) {
     const geo = geoMap[h.currency] ?? "Global";
     totals[geo] = (totals[geo] ?? 0) + h.valueSGD;
   }
@@ -299,7 +305,7 @@ export function computeMovers(holdings: HoldingRow[]): {
   gainers: MoverItem[];
   losers: MoverItem[];
 } {
-  const items: MoverItem[] = holdings.map((h) => {
+  const items: MoverItem[] = toNetPositions(holdings).map((h) => {
     const cost = computeCostBasisSGD(h);
     const asset = cost > 0 ? (computeAssetGainSGD(h) / cost) * 100 : 0;
     const fx = cost > 0 ? (computeFxGainSGD(h) / cost) * 100 : 0;
@@ -313,8 +319,9 @@ export function computeMovers(holdings: HoldingRow[]): {
 }
 
 export function computeCurrencyCards(holdings: HoldingRow[]): CurrencyCard[] {
+  const positions = toNetPositions(holdings);
   const groups: Record<string, HoldingRow[]> = {};
-  for (const h of holdings) {
+  for (const h of positions) {
     if (h.currency === "SGD") continue;
     (groups[h.currency] ??= []).push(h);
   }
@@ -327,7 +334,7 @@ export function computeCurrencyCards(holdings: HoldingRow[]): CurrencyCard[] {
     JPY: "🇯🇵",
     HKD: "🇭🇰",
   };
-  const grandTotal = holdings.reduce((s, h) => s + h.valueSGD, 0);
+  const grandTotal = positions.reduce((s, h) => s + h.valueSGD, 0);
 
   return Object.entries(groups).map(([code, hs]) => {
     const exposure = hs.reduce((s, h) => s + h.valueSGD, 0);
