@@ -83,7 +83,7 @@ export function NerveBar({
   }
 
   return (
-    <header className="sticky top-0 z-50 grid h-[62px] flex-[0_0_62px] grid-cols-[1fr_auto_1fr] items-center overflow-hidden border-b border-subtle bg-[rgba(8,9,15,0.72)] px-[26px] backdrop-blur-[14px] max-bp768:grid-cols-[auto_1fr_auto] max-bp768:gap-1.5 max-bp768:px-4 max-bp600:px-3 max-bp480:h-[52px] max-bp380:px-2 light:bg-[rgba(236,234,244,0.86)]">
+    <header className="sticky top-0 z-50 grid h-[62px] flex-[0_0_62px] grid-cols-[1fr_auto_1fr] items-center overflow-hidden border-b border-subtle bg-[rgba(10,8,5,0.75)] px-[26px] backdrop-blur-[14px] max-bp768:grid-cols-[auto_1fr_auto] max-bp768:gap-1.5 max-bp768:px-4 max-bp600:px-3 max-bp480:h-[52px] max-bp380:px-2 light:bg-[rgba(234,224,200,0.88)]">
       <div className="flex flex-col leading-none">
         <span className="font-serif text-[22px] tracking-[.4px] text-gold [text-shadow:0_0_22px_var(--accent-glow)] max-bp768:text-[17px] max-bp600:text-[15px] max-bp480:text-[14px] max-bp380:text-[13px]">
           {wordmark}

@@ -1155,9 +1155,9 @@ function ImportPanel() {
 }
 
 export default function AddPage() {
-  return (
+  return ( //changed width
     <div className="flex flex-col gap-4.5 min-w-0 w-full">
-      <div className="grid grid-cols-2 gap-4.5 items-start max-bp1080:grid-cols-1">
+      <div className="grid grid-cols-[3fr_2fr] gap-4.5 items-start max-bp1080:grid-cols-1">
         <ManualForm />
         <ImportPanel />
       </div>

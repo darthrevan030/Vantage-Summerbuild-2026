@@ -92,7 +92,7 @@ export function TabBar({
   return (
     <>
       {/* Desktop horizontal tab bar */}
-      <nav className="sticky top-[62px] z-40 flex h-12 items-center gap-1.5 overflow-x-auto border-b border-subtle bg-[rgba(8,9,15,0.72)] px-[22px] backdrop-blur-[14px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-bp768:gap-0.5 max-bp768:px-2.5 max-bp600:hidden max-bp480:h-[42px] light:bg-[rgba(236,234,244,0.86)]">
+      <nav className="sticky top-[62px] z-40 flex h-12 items-center gap-1.5 overflow-x-auto border-b border-subtle bg-[rgba(8,9,15,0.72)] px-[22px] backdrop-blur-[14px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-bp768:gap-0.5 max-bp768:px-2.5 max-bp600:hidden max-bp480:h-[42px] light:bg-[rgba(234,224,200,0.86)]">
         {TABS.map(({ label, href, icon }) => (
           <Link
             key={href}

@@ -35,26 +35,28 @@
 
 /* LIGHT MODE tokens — toggled via html.light */
 html.light {
-  --bg-base:       #F5F0E8;
-  --bg-surface:    #FDFAF4;
-  --bg-elevated:   #EDE8DC;
-  --border-subtle: rgba(80,60,20,0.10);
-  --border-gold:   rgba(160,110,20,0.38);
-  --gold:          #A07220;
-  --gold-dim:      #7A5818;
-  --accent-wash:   rgba(160,114,32,0.09);
-  --accent-tint:   rgba(160,114,32,0.15);
-  --accent-glow:   rgba(160,114,32,0.14);
-  --gain:          #1A8C52;
-  --loss:          #B83030;
-  --fx-positive:   #A07220;
-  --fx-negative:   #B83030;
-  --text-primary:  #1C1710;
-  --text-secondary:#6B6050;
-  --text-muted:    #A09080;
-  --card-shadow:   0 1px 3px rgba(0,0,0,0.06);
-  --donut-track:   rgba(0,0,0,0.06);
-  --pulse-c:       rgba(26,140,82,0.45);
+  --bg-base:       #F0EAD8;          /* warm parchment — richer than before */
+  --bg-surface:    #FAF6ED;          /* cream card surface, distinct from base */
+  --bg-elevated:   #EDE4CF;          /* inputs/chips — clearly inset */
+  --border-subtle: rgba(90,65,20,0.11);
+  --border-gold:   rgba(150,100,15,0.40);
+  --gold:          #9A6E10;          /* deeper amber — readable & warm */
+  --gold-dim:      #7A5610;
+  --accent-wash:   rgba(154,110,16,0.08);
+  --accent-tint:   rgba(154,110,16,0.14);
+  --accent-glow:   rgba(154,110,16,0.12);
+  --gain:          #1A7A48;          /* deeper green — more contrast on light */
+  --loss:          #AA2A2A;          /* deeper red */
+  --fx-positive:   #9A6E10;
+  --fx-negative:   #AA2A2A;
+  --text-primary:  #18120A;          /* near-black with warm tint */
+  --text-secondary:#5A4A34;          /* clear mid-tone, not too grey */
+  --text-muted:    #9A8870;          /* warm grey, distinct from secondary */
+  --card-shadow:   0 1px 0 rgba(255,255,255,0.7) inset,
+                   0 2px 8px rgba(80,50,10,0.10),
+                   0 8px 24px rgba(80,50,10,0.07);
+  --donut-track:   rgba(0,0,0,0.07);
+  --pulse-c:       rgba(26,122,72,0.40);
 }
 
 /* ================================================================
@@ -137,6 +139,8 @@ html.light {
   box-shadow:var(--card-shadow);
   transition:border-color .28s ease;
   &:hover{border-color:rgba(186,170,255,0.16);}
+  html.light &{background:linear-gradient(180deg,rgba(255,252,240,0.8),transparent 40%),var(--bg-surface);}
+  html.light &:hover{border-color:rgba(150,100,15,0.28);}
 }
 @utility inp {
   background:var(--bg-elevated);

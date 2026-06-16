@@ -224,6 +224,29 @@ type HlState = HlItem[] | "loading" | "no-key" | "empty";
 
 const HL_CACHE: Record<string, HlItem[]> = {};
 
+/** Pre-fetch news for all symbols in one request and populate HL_CACHE. */
+async function prefetchAllNews(positions: { id: string; name: string }[]): Promise<void> {
+  if (positions.length === 0) return;
+  try {
+    // Pass both symbol and name so the API can build a smart query without hardcoding
+    const payload = positions.map(p => `${p.id}|${encodeURIComponent(p.name)}`).join(",");
+    const res = await fetch(
+      `/api/news?symbols=${encodeURIComponent(payload)}`,
+    );
+    const data = await res.json();
+    // Bulk endpoint returns { noKey: true } when no API keys are configured
+    if (!Array.isArray(data)) return;
+    for (const { symbol, items } of data as {
+      symbol: string;
+      items: HlItem[];
+    }[]) {
+      if (Array.isArray(items)) HL_CACHE[symbol] = items;
+    }
+  } catch {
+    // Non-fatal — individual SentDrawers will fall back to single fetches
+  }
+}
+
 function SentDrawer({
   id,
   name,
@@ -251,7 +274,7 @@ function SentDrawer({
     let live = true;
     (async () => {
       try {
-        const res = await fetch(`/api/news?symbol=${encodeURIComponent(id)}`);
+        const res = await fetch(`/api/news?symbol=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`);
         const data = await res.json();
         // API returned no-key sentinel
         if (data && !Array.isArray(data) && data.noKey) {
@@ -809,6 +832,11 @@ export default function AnalysisPage() {
 
   const run = async () => {
     setAiRunning(true);
+    // Kick off news pre-fetch for all holdings in parallel with the AI call.
+    // This populates HL_CACHE so every SentDrawer opens instantly with fresh
+    // headlines instead of fetching one symbol at a time on expand.
+    const ids = positions.map((p) => ({ id: p.id, name: p.name }));
+    prefetchAllNews(ids); // intentionally not awaited — fire and forget
     let res: AnalysisData;
     try {
       res = await runSentimentAI(positions);

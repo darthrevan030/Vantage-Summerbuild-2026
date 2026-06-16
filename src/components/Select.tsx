@@ -14,7 +14,6 @@ const SEARCH_THRESHOLD = 6;
 export function Select({ value, options, onChange }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -25,25 +24,27 @@ export function Select({ value, options, onChange }: SelectProps) {
     return q === "" ? options : options.filter((o) => o.toLowerCase().includes(q));
   }, [options, query]);
 
-  // Anchor the (fixed-positioned) dropdown to the trigger. Recomputed on every
-  // scroll/resize so it tracks the field instead of detaching when the page or
-  // a scrollable card moves underneath it (the mobile bug).
+  //fix dropdown
+  const [openUp, setOpenUp] = useState(false);
+  const [maxHeight, setMaxHeight] = useState(300);
+
   const place = useCallback(() => {
     const r = triggerRef.current?.getBoundingClientRect();
     if (!r) return;
     const spaceBelow = window.innerHeight - r.bottom;
     const spaceAbove = r.top;
-    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
-    const maxHeight = Math.max(
+    const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const mh = Math.max(
       140,
-      Math.min(300, (openUp ? spaceAbove : spaceBelow) - 12),
+      Math.min(300, (shouldOpenUp ? spaceAbove : spaceBelow) - 12),
     );
-    setDropStyle(
-      openUp
-        ? { bottom: window.innerHeight - r.top + 4, left: r.left, width: r.width, maxHeight }
-        : { top: r.bottom + 4, left: r.left, width: r.width, maxHeight },
-    );
+    setOpenUp(shouldOpenUp);
+    setMaxHeight(mh);
   }, []);
+
+  const dropStyle: React.CSSProperties = openUp
+    ? { bottom: "100%", marginBottom: 4, maxHeight }
+    : { top: "100%", marginTop: 4, maxHeight };
 
   const openDrop = useCallback(() => {
     setQuery("");
@@ -51,7 +52,7 @@ export function Select({ value, options, onChange }: SelectProps) {
     setOpen(true);
   }, [place]);
 
-  // Close on outside click; reposition on scroll/resize while open.
+  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
@@ -60,15 +61,10 @@ export function Select({ value, options, onChange }: SelectProps) {
         setOpen(false);
     };
     document.addEventListener("mousedown", close);
-    // capture:true catches scrolls of nested/overflowing containers (cards) too
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
     return () => {
       document.removeEventListener("mousedown", close);
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
     };
-  }, [open, place]);
+  }, [open]);
 
   // Focus the search box when a searchable dropdown opens.
   useEffect(() => {
@@ -107,7 +103,7 @@ export function Select({ value, options, onChange }: SelectProps) {
       {open && (
         <div
           ref={dropRef}
-          className="fixed z-[9999] flex flex-col rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
+          className="absolute left-0 z-[9999] flex w-full flex-col rounded-[10px] border border-subtle bg-surface p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45),0_0_0_1px_rgba(186,170,255,0.08)]"
           style={dropStyle}
         >
           {showSearch && (
