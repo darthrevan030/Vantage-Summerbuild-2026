@@ -217,73 +217,152 @@ async function fetchAlphaVantage(
 // We search by company name keyword so it works for any global asset.
 // Env var: NEWS_API_KEY
 
-/** Build a NewsAPI search query from the company name + ticker.
- *  Uses the name when available (most specific), otherwise the bare ticker in quotes.
- *  Strips exchange suffixes and adds a financial context keyword to reduce noise. */
-function buildNewsQuery(symbol: string, name?: string): string {
+/** Build a ranked list of NewsAPI queries to try, from most to least specific.
+ *  We try them in order and return the first that yields results. */
+function buildNewsQueries(symbol: string, name?: string): string[] {
   const ticker = baseTicker(symbol).toUpperCase();
+  const queries: string[] = [];
+  const fin = "stock OR shares OR earnings OR investor"; // financial context bias
 
   if (name && name.trim().length > 0) {
-    // Use the full company name in quotes for precision, e.g. "DBS Group Holdings"
-    // Strip common generic suffixes that broaden results unhelpfully
-    const cleanName = name
-      .replace(/\b(Ltd|Limited|Corp|Corporation|Inc|Incorporated|Plc|ETF|Fund|UCITS|Trust)\b\.?/gi, "")
-      .trim();
-    return `"${cleanName}"`;
+    const isEtf = /\bETF\b|\bFund\b|\bUCITS\b/i.test(name);
+
+    if (isEtf) {
+      // For ETFs: keep the fund family + ETF keyword — "Vanguard" alone is too broad,
+      // "Vanguard ETF" gives the right financial context
+      const family = name
+        .replace(/\b(FTSE|UCITS|All-World|All World|Developed|Emerging|World|Global|Index)\b/gi, "")
+        .replace(/\b(Ltd|Limited|Corp|Corporation|Inc|Incorporated|Plc|Trust|Holdings?|Group)\b\.?/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      const familyWords = family.split(/\s+/).filter(Boolean);
+      // e.g. "Vanguard All-World UCITS ETF" → query: "Vanguard ETF"
+      if (familyWords.length >= 1) {
+        queries.push(`"${familyWords[0]}" ETF`);
+      }
+      // Fallback: just the ticker
+      queries.push(`"${ticker}" ETF`);
+    } else {
+      // Strip generic corporate suffixes but keep the meaningful name
+      const stripped = name
+        .replace(/\b(Ltd|Limited|Corp|Corporation|Inc|Incorporated|Plc|ETF|Fund|UCITS|Trust|Holdings?|Group)\b\.?/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      const words = stripped.split(/\s+/).filter(Boolean);
+
+      // 1. Full stripped name in quotes + financial context
+      // e.g. "Singapore Airlines" stock OR shares OR earnings
+      if (words.length >= 2) {
+        queries.push(`"${words.slice(0, 3).join(" ")}" ${fin}`);
+      }
+
+      // 2. For short names / tickers (≤4 chars), always append financial context
+      // e.g. "DBS" stock OR shares OR earnings
+      if (words.length === 1 || ticker.length <= 4) {
+        const term = words.length >= 1 ? words[0] : ticker;
+        queries.push(`"${term}" ${fin}`);
+      }
+
+      // 3. Ticker + financial context as final fallback
+      queries.push(`"${ticker}" ${fin}`);
+    }
+  } else {
+    // No name — ticker + financial context
+    queries.push(`"${ticker}" ${fin}`);
+    // Very last resort: bare ticker
+    queries.push(`"${ticker}"`);
   }
 
-  // Fallback: quoted ticker — at least avoids partial word matches
-  return `"${ticker}"`;
+  return queries;
 }
 
+// Restrict NewsAPI results to reputable financial/business news domains only.
+// This prevents travel, lifestyle, and sports articles matching on company names
+// (e.g. Singapore Airlines baggage policy, Toyota motorsport results).
+const FINANCE_DOMAINS = [
+  "reuters.com",
+  "bloomberg.com",
+  "ft.com",
+  "wsj.com",
+  "cnbc.com",
+  "marketwatch.com",
+  "seekingalpha.com",
+  "investopedia.com",
+  "fool.com",
+  "businessinsider.com",
+  "forbes.com",
+  "finance.yahoo.com",
+  "livemint.com",
+  "economictimes.indiatimes.com",
+  "thehindubusinessline.com",
+  "thestreet.com",
+  "barrons.com",
+  "morningstar.com",
+  "financialpost.com",
+  "theedgemalaysia.com",
+  "businesstimes.com.sg",
+  "nikkei.com",
+  "scmp.com",
+  "investing.com",
+  "benzinga.com",
+].join(",");
+
 async function fetchNewsApi(symbol: string, key: string, name?: string): Promise<NewsItem[]> {
-  const query = buildNewsQuery(symbol, name);
+  const queries = buildNewsQueries(symbol, name);
 
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      language: "en",
-      sortBy: "publishedAt",
-      pageSize: "5",
-      apiKey: key,
-    });
+  for (const query of queries) {
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        language: "en",
+        sortBy: "publishedAt",
+        pageSize: "5",
+        domains: FINANCE_DOMAINS,
+        apiKey: key,
+      });
 
-    const res = await fetch(
-      `https://newsapi.org/v2/everything?${params.toString()}`,
-      { next: { revalidate: 900 } },
-    );
+      const res = await fetch(
+        `https://newsapi.org/v2/everything?${params.toString()}`,
+        { next: { revalidate: 900 } },
+      );
 
-    if (!res.ok) {
-      console.log(`[news:newsapi] HTTP ${res.status} for ${symbol}`);
-      return [];
+      if (!res.ok) {
+        console.log(`[news:newsapi] HTTP ${res.status} for ${symbol} query="${query}"`);
+        continue;
+      }
+
+      const data = await res.json();
+      if (data.status !== "ok" || !Array.isArray(data.articles)) {
+        console.log(`[news:newsapi] bad response for ${symbol}:`, JSON.stringify(data).slice(0, 200));
+        continue;
+      }
+
+      console.log(`[news:newsapi] ${symbol} query="${query}" → ${data.articles.length} articles`);
+
+      if (data.articles.length === 0) continue; // try next broader query
+
+      return data.articles
+        .slice(0, 5)
+        .map((n: { title?: string; source?: { name?: string }; publishedAt?: string }) => {
+          const headline = String(n.title ?? "").trim().slice(0, 120);
+          const ts = n.publishedAt
+            ? Math.floor(new Date(n.publishedAt).getTime() / 1000)
+            : 0;
+          return {
+            t: headline,
+            src: String(n.source?.name ?? "NewsAPI").split(" ").slice(0, 2).join(" "),
+            sent: tag(headline),
+            ago: ago(ts),
+          };
+        })
+        .filter((n: NewsItem) => n.t);
+    } catch {
+      continue;
     }
-
-    const data = await res.json();
-    if (data.status !== "ok" || !Array.isArray(data.articles)) {
-      console.log(`[news:newsapi] bad response for ${symbol}:`, JSON.stringify(data).slice(0, 200));
-      return [];
-    }
-
-    console.log(`[news:newsapi] ${symbol} (query: "${query}") → ${data.articles.length} articles`);
-
-    return data.articles
-      .slice(0, 5)
-      .map((n: { title?: string; source?: { name?: string }; publishedAt?: string }) => {
-        const headline = String(n.title ?? "").trim().slice(0, 120);
-        const ts = n.publishedAt
-          ? Math.floor(new Date(n.publishedAt).getTime() / 1000)
-          : 0;
-        return {
-          t: headline,
-          src: String(n.source?.name ?? "NewsAPI").split(" ").slice(0, 2).join(" "),
-          sent: tag(headline),
-          ago: ago(ts),
-        };
-      })
-      .filter((n: NewsItem) => n.t);
-  } catch {
-    return [];
   }
+
+  return [];
 }
 
 // ── Core per-symbol fetch (waterfall) ────────────────────────────────────────
@@ -296,6 +375,7 @@ async function fetchNewsForSymbol(
   alphaKey: string | undefined,
   newsApiKey: string | undefined,
   name?: string,
+  finnhubEnabled = true,
 ): Promise<NewsItem[] | "no-key"> {
   const hasAnyKey =
     (finnhubKey && !finnhubKey.startsWith("placeholder")) ||
@@ -305,9 +385,8 @@ async function fetchNewsForSymbol(
   if (!hasAnyKey) return "no-key";
 
   // 1. Finnhub — best for US equities and some global exchanges
-  if (finnhubKey && !finnhubKey.startsWith("placeholder")) {
+  if (finnhubEnabled && finnhubKey && !finnhubKey.startsWith("placeholder")) {
     const items = await fetchFinnhub(symbol, finnhubKey);
-    console.log(`[news:finnhub] ${symbol} → ${items.length} items`);
     if (items.length > 0) return items;
   } else {
     console.log(`[news:finnhub] skipped — no key`);
@@ -343,12 +422,11 @@ export async function GET(req: NextRequest) {
   const limited = await enforceRateLimit("news", 30, 60);
   if (limited) return limited;
 
-  const { finnhub: enabled } = await getProviderFlags();
-  if (!enabled) return Response.json([]);
+  const { finnhub: finnhubEnabled, alphavantage: alphaEnabled, newsapi: newsApiEnabled } = await getProviderFlags();
 
   const finnhubKey = process.env.FINNHUB_API_KEY;
-  const alphaKey = process.env.ALPHA_VANTAGE_KEY;
-  const newsApiKey = process.env.NEWS_API_KEY;
+  const alphaKey = alphaEnabled ? process.env.ALPHA_VANTAGE_KEY : undefined;
+  const newsApiKey = newsApiEnabled ? process.env.NEWS_API_KEY : undefined;
 
   // ── Bulk mode: ?symbols=VWRA.LSE|Vanguard%20All-World,D05.SG|DBS%20Group ──
   // Each entry is "SYMBOL|encodedName". Returns: Array<{ symbol, items }>
@@ -377,7 +455,7 @@ export async function GET(req: NextRequest) {
 
     const results = await Promise.all(
       entries.map(async ({ symbol, name }) => {
-        const items = await fetchNewsForSymbol(symbol, finnhubKey, alphaKey, newsApiKey, name);
+        const items = await fetchNewsForSymbol(symbol, finnhubKey, alphaKey, newsApiKey, name, finnhubEnabled);
         return { symbol, items: items === "no-key" ? [] : items };
       }),
     );
@@ -397,11 +475,10 @@ export async function GET(req: NextRequest) {
   const name = req.nextUrl.searchParams.get("name") ?? undefined;
 
   try {
-    const result = await fetchNewsForSymbol(symbol, finnhubKey, alphaKey, newsApiKey, name);
+    const result = await fetchNewsForSymbol(symbol, finnhubKey, alphaKey, newsApiKey, name, finnhubEnabled);
     if (result === "no-key")
       return Response.json({ noKey: true }, { status: 200 });
 
-    console.log(`[news] ${symbol} → ${result.length} items`, result.map(i => i.src));
     return Response.json(result, {
       headers: { "Cache-Control": "public, s-maxage=900" },
     });

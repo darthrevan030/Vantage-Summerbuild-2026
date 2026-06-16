@@ -1,19 +1,22 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export interface ProviderFlags {
-  sgx:         boolean;
-  eodhd:       boolean;
-  yahoo:       boolean;
-  coingecko:   boolean;
-  goldapi:     boolean;
-  finnhub:     boolean;
-  frankfurter: boolean;
-  anthropic: boolean;
+  sgx:          boolean;
+  eodhd:        boolean;
+  yahoo:        boolean;
+  coingecko:    boolean;
+  goldapi:      boolean;
+  finnhub:      boolean;
+  frankfurter:  boolean;
+  anthropic:    boolean;
+  alphavantage: boolean;
+  newsapi:      boolean;
 }
 
 const DEFAULT: ProviderFlags = {
   sgx: true, eodhd: true, yahoo: true, coingecko: true, goldapi: true,
   finnhub: true, frankfurter: true, anthropic: true,
+  alphavantage: true, newsapi: true,
 };
 
 // CPF LIFE monthly payout rates: dollars of payout per $1,000 of Retirement

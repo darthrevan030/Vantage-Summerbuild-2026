@@ -190,8 +190,8 @@ export default function OverviewPage() {
   const ccyCards = computeCurrencyCards(holdings);
   const bySource = computeAllocationBySource(holdings);
   const assetGain = hero.totalGain - hero.fxImpact;
-  const acTop = assetAllocation[0];
-  const geoTop = geoAllocation[0];
+  const acTop = assetAllocation.reduce((max, s) => s.value > max.value ? s : max, assetAllocation[0]);
+  const geoTop = geoAllocation.reduce((max, s) => s.value > max.value ? s : max, geoAllocation[0]);
   const totalValue = hero.total;
 
   // Cash + CPF live alongside holdings but aren't part of the portfolio context;

@@ -378,13 +378,17 @@ export default async function AdminPage() {
       >
         <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
           <span className="text-[13px] font-semibold tracking-[.01em] text-primary">
-            Price Data Providers
+            API Providers
           </span>
           <span className="font-ui text-[11px] text-secondary">
             disable to preserve quotas during testing
           </span>
         </div>
-        <div>
+
+        <div className="mb-3 font-ui text-[11px] font-semibold uppercase tracking-[.08em] text-muted">
+          Price &amp; Data
+        </div>
+        <div className="mb-4">
           {(
             [
               {
@@ -414,7 +418,7 @@ export default async function AdminPage() {
               {
                 code: "finnhub",
                 label: "Finnhub",
-                region: "Equity sparklines, quotes, news, FX candles",
+                region: "Equity sparklines, quotes, FX candles",
                 active: providerFlags.finnhub,
               },
               {
@@ -428,6 +432,49 @@ export default async function AdminPage() {
                 label: "Anthropic",
                 region: "Analyst AI (Claude)",
                 active: providerFlags.anthropic,
+              },
+            ] as {
+              code: string;
+              label: string;
+              region: string;
+              active: boolean;
+            }[]
+          ).map((p) => (
+            <ActiveToggle
+              key={p.code}
+              code={p.code}
+              label={p.label}
+              region={p.region}
+              initialActive={p.active}
+              endpoint="/api/admin/config"
+              codeMinWidth={72}
+            />
+          ))}
+        </div>
+
+        <div className="mb-3 border-t border-subtle pt-4 font-ui text-[11px] font-semibold uppercase tracking-[.08em] text-muted">
+          News
+        </div>
+        <div>
+          {(
+            [
+              {
+                code: "finnhub_news",
+                label: "Finnhub News",
+                region: "US equities & major global stocks — primary news source",
+                active: providerFlags.finnhub,
+              },
+              {
+                code: "alphavantage",
+                label: "Alpha Vantage",
+                region: "Non-US equities, crypto, gold — fallback (25 req/day free)",
+                active: providerFlags.alphavantage ?? true,
+              },
+              {
+                code: "newsapi",
+                label: "NewsAPI",
+                region: "Keyword search across finance domains — last resort (1000 req/day free)",
+                active: providerFlags.newsapi ?? true,
               },
             ] as {
               code: string;
