@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getProviderFlags } from "@/lib/supabase/app-config";
 import { RoleToggle } from "./RoleToggle";
 import { ActiveToggle } from "./ActiveToggle";
+import { DeleteUserButton } from "./DeleteUserButton";
+import { isAdminRole } from "@/lib/roles";
 import type { CurrencyRow } from "@/app/api/currencies/route";
 import type { ExchangeRow } from "@/app/api/exchanges/route";
 
@@ -38,7 +40,8 @@ export default async function AdminPage() {
     .eq("user_id", user.id)
     .single();
 
-  if (mySettings?.role !== "admin") redirect("/overview");
+  if (!isAdminRole(mySettings?.role)) redirect("/overview");
+  const viewerRole = mySettings?.role ?? "admin";
 
   // --- Data: anon client for RLS-governed queries, admin only for auth.users ---
   const adminClient = createAdminClient();
@@ -201,10 +204,10 @@ export default async function AdminPage() {
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-subtle">
-              {["Email", "Joined", "Display Name", "Holdings", "Role"].map(
+              {["Email", "Joined", "Display Name", "Holdings", "Role", ""].map(
                 (h, i) => (
                   <th
-                    key={h}
+                    key={h || "actions"}
                     className={
                       "py-2 px-0 font-ui text-[11px] font-medium tracking-[.04em] text-secondary " +
                       (i >= 3 ? "text-right" : "text-left")
@@ -236,7 +239,20 @@ export default async function AdminPage() {
                   {row.holdingCount}
                 </td>
                 <td className="py-2.5 text-right">
-                  <RoleToggle userId={row.id} initialRole={row.role} />
+                  <RoleToggle
+                    userId={row.id}
+                    initialRole={row.role}
+                    viewerRole={viewerRole}
+                  />
+                </td>
+                <td className="py-2.5 text-right">
+                  <DeleteUserButton
+                    userId={row.id}
+                    email={row.email}
+                    targetRole={row.role}
+                    viewerRole={viewerRole}
+                    isSelf={row.id === user.id}
+                  />
                 </td>
               </tr>
             ))}

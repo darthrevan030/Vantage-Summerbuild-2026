@@ -7,6 +7,7 @@ import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { CCY_SYMBOL } from "@/lib/formatters";
 import { useCurrencies } from "@/hooks/useCurrencies";
+import { isAdminRole } from "@/lib/roles";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -29,6 +30,8 @@ export default function SettingsPage() {
   const [nameInput, setNameInput] = useState(displayName);
   const [ccyInput, setCcyInput] = useState(baseCurrency);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const isLiveRate = (c: string) => c === "SGD" || c.toLowerCase() in fxColors;
 
@@ -57,6 +60,24 @@ export default function SettingsPage() {
         (body as { error?: string }).error ?? "Failed to save preferences",
       );
       setTimeout(() => setSaveState("idle"), 3000);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/account", { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? res.statusText);
+      }
+      toast.success("Account deleted");
+      // Session is already signed out server-side; leave the authed area.
+      router.push("/login");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete account");
+      setDeleting(false);
+      setConfirmingDelete(false);
     }
   }
 
@@ -212,7 +233,7 @@ export default function SettingsPage() {
         </div>
       </form>
 
-      {role === "admin" && (
+      {isAdminRole(role) && (
         <div
           className="card px-5 py-4.5 max-bp480:p-3.5 max-bp380:p-3 animate-reveal"
           style={{ animationDelay: ".14s" }}
@@ -222,7 +243,7 @@ export default function SettingsPage() {
               Admin
             </span>
             <span className="font-ui text-[11px] font-semibold px-[11px] py-1 rounded-full whitespace-nowrap tracking-[.02em] bg-[rgba(70,216,160,.14)] text-gain">
-              admin
+              {role}
             </span>
           </div>
           <p
@@ -240,6 +261,58 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      {/* Danger zone — self-service account deletion */}
+      <div
+        className="card flex flex-col gap-4 border-[rgba(229,115,115,.25)] px-5 py-4.5 max-bp480:p-3.5 max-bp380:p-3 animate-reveal"
+        style={{ animationDelay: ".2s" }}
+      >
+        <div className="flex items-baseline justify-between mb-1">
+          <span className="text-[13px] font-semibold text-loss tracking-[.01em]">
+            Delete Account
+          </span>
+        </div>
+        <p className="font-ui text-secondary" style={{ fontSize: 13 }}>
+          Permanently removes your account and all associated data — holdings,
+          transactions, CPF and cash balances, snapshots, and preferences. This
+          cannot be undone.
+        </p>
+        {confirmingDelete ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={handleDeleteAccount}
+              disabled={deleting}
+              className="flex items-center gap-2 cursor-pointer rounded-[10px] border border-[rgba(229,115,115,.4)] bg-[rgba(229,115,115,.12)] px-4 py-2.5 font-ui text-[13px] font-semibold text-loss transition-all hover:bg-[rgba(229,115,115,.2)] disabled:cursor-wait disabled:opacity-60"
+            >
+              {deleting ? (
+                <>
+                  <Icon name="refresh" size={14} className="animate-spin-slow" />{" "}
+                  Deleting…
+                </>
+              ) : (
+                "Yes, permanently delete everything"
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={deleting}
+              className="flex items-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle bg-surface px-[13px] py-2 font-ui text-[12.5px] text-secondary transition-all hover:border-gold-soft hover:text-gold"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+            className="flex items-center gap-2 self-start cursor-pointer rounded-[10px] border border-[rgba(229,115,115,.35)] bg-transparent px-4 py-2.5 font-ui text-[13px] font-semibold text-loss transition-all hover:bg-[rgba(229,115,115,.12)]"
+          >
+            <Icon name="x" size={14} /> Delete my account
+          </button>
+        )}
+      </div>
     </div>
   );
 }

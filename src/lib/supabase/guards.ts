@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isAdminRole, type Role } from "@/lib/roles";
 
 export async function getAuthUser(): Promise<User | null> {
   const supabase = await createClient();
@@ -27,12 +28,13 @@ export async function requireAuth(): Promise<GuardResult<{ user: User }>> {
 }
 
 /**
- * 401 without a session, 403 unless user_settings.role is 'admin'.
- * On success returns the service-role client for writes that must bypass RLS —
- * the anon-key client silently matches zero rows on tables without a write policy.
+ * 401 without a session, 403 unless the user is an admin or superadmin.
+ * Returns the viewer's `role` (so routes can enforce tier-specific rules) and
+ * the service-role client for writes that must bypass RLS — the anon-key client
+ * silently matches zero rows on tables without a write policy.
  */
 export async function requireAdmin(): Promise<
-  GuardResult<{ user: User; adminClient: SupabaseClient }>
+  GuardResult<{ user: User; adminClient: SupabaseClient; role: Role }>
 > {
   const supabase = await createClient();
   const {
@@ -51,7 +53,7 @@ export async function requireAdmin(): Promise<
     .eq("user_id", user.id)
     .single();
 
-  if (settings?.role !== "admin") {
+  if (!isAdminRole(settings?.role)) {
     return {
       error: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
@@ -69,5 +71,5 @@ export async function requireAdmin(): Promise<
     };
   }
 
-  return { user, adminClient };
+  return { user, adminClient, role: (settings?.role ?? "admin") as Role };
 }
