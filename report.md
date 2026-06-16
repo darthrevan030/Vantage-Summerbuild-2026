@@ -73,6 +73,8 @@ If the ONLY result is the line where it's defined, it's dead. If there are other
 | 6 | Two React hooks live in `src/lib/` instead of `src/hooks/` | `src/lib/useCountUp.ts`, `src/lib/useDateRange.ts` |
 | 7 | The same validation patterns are copy-pasted across many API routes | `CCY_RE = /^[A-Z]{3}$/` appears in ~6 routes; `DATE_RE` in ~3; `finiteNonNeg` defined twice |
 | 8 | The same "stock symbol mapping" tables are copied between files | `EODHD_CODE_REMAP` in both `src/lib/prices.ts` and `src/app/api/holdings/backfill/route.ts` |
+| 13 | A third exchange-mapping table sits in the news route | `EODHD_TO_FINNHUB` in `src/app/api/news/route.ts` maps EODHD exchange codes → Finnhub prefixes. Related to `EODHD_CODE_REMAP` but different direction. Both could move to `src/lib/provider-symbols.ts` (see Step 3.2). |
+| 14 | `baseTicker()` utility duplicated in context | `src/app/api/news/route.ts` defines a local `baseTicker()` that strips the exchange suffix from dot-notation tickers. The same logic is inlined in `prices.ts` line 88. Candidate for `src/lib/provider-symbols.ts` or a small `src/lib/tickers.ts` shared util. |
 
 ### C. Boilerplate (the same logic written by hand over and over)
 
@@ -81,7 +83,7 @@ If the ONLY result is the line where it's defined, it's dead. If there are other
 | 9 | Every protected API route repeats the same auth check | `const { user, error } = await requireAuth(); if (error) return error;` in ~15 routes |
 | 10 | Rate-limit / provider-flag guards are repeated | ~7 routes (rate limit), ~12 routes (provider flags) |
 | 11 | FX history fetching is implemented twice | `fetchFxHistory` in `backfill/route.ts` duplicates `ensureFxHistory` in `src/lib/providers/fx.ts` |
-| 12 | Three page files are giant (1000+ lines) mixing data + UI | `holdings/page.tsx` (1628), `add/page.tsx` (1166), `analysis/page.tsx` (913) |
+| 12 | Three page files are giant (1000+ lines) mixing data + UI | `holdings/page.tsx` (1689), `add/page.tsx` (1425, grown with PDF import UI), `analysis/page.tsx` (940) |
 
 ---
 

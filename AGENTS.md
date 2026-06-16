@@ -23,6 +23,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | Animation | `motion` (Framer Motion) — landing page only |
 | AI | `@anthropic-ai/sdk` — streaming analysis/Q&A (use latest Claude models) |
 | Prices/FX | `yahoo-finance2`, Frankfurter (FX), EODHD, Finnhub |
+| News | Finnhub (US equities) · Alpha Vantage (non-US, crypto, gold) · NewsAPI (fallback) |
+| PDF parsing | `pdf-parse` — broker statement import (FSMOne, DBS Vickers) |
 | Notifications | `sonner` (toasts) |
 | Hosting | Vercel (`@vercel/analytics`, `@vercel/speed-insights`) |
 
@@ -58,20 +60,22 @@ src/
 │  ├─ layout.tsx           Root layout (theme, fonts, analytics)
 │  └─ page.tsx             Public landing page
 ├─ components/
-│  ├─ (top level)          DashboardShell, NerveBar, TabBar, SummaryRail, Select, Icon, etc.
+│  ├─ (top level)          DashboardShell, NerveBar, TabBar, SummaryRail, Select, Icon, RoleToggle, ActiveToggle, DeleteUserButton, etc.
 │  ├─ charts/              AreaTrend, Donut, Dumbbell, FXArea, Legend, Spark
 │  └─ landing/             Marketing/landing animations (motion-heavy)
 ├─ context/portfolio.tsx   ★ client-side portfolio state + currency conversion
 ├─ hooks/                  useCachedList, useCurrencies, useExchanges, useFxSparks, useOptimisticToggle
 ├─ lib/
-│  ├─ supabase/            DB layer: client/server/admin, data.ts (all queries), guards, rate-limit, app-config
+│  ├─ supabase/            DB layer: client/server/admin, data.ts (all queries), guards, delete-user (purgeUser), rate-limit, app-config
 │  ├─ providers/           External data: fx, sgx, dividends, history
+│  ├─ pdf-parsers/         Broker statement parsing: types.ts, index.ts (detectBroker), fsmone.ts, dbs-vickers.ts
 │  ├─ api/client/          analyst-api.ts (streamSentiment/streamAsk)
 │  ├─ api/server/          list-route.ts (createTableListGET factory)
 │  ├─ portfolio.ts         ★ all compute*/generate* derived-data functions
 │  ├─ prices.ts            Live price fetching + symbol mapping per provider
 │  ├─ group-holdings.ts    Aggregate lots → positions (toNetPositions, groupHoldings)
-│  ├─ formatters.ts        NF, pct, rate, ccyFmt, ccySigned, CCY_SYMBOL, SUPPORTED_CURRENCIES
+│  ├─ formatters.ts        NF, pct, rate, ccyFmt, ccySigned, CCY_SYMBOL, CCY_FLAG, SUPPORTED_CURRENCIES
+│  ├─ roles.ts             ★ Role type + permission matrix (canSetRole/canDeleteRole, isAdminRole)
 │  └─ fx.ts, positions.ts, hexA.ts, useCountUp.ts, useDateRange.ts
 ├─ types/                  holding, portfolio, settings, snapshot, chat
 └─ proxy.ts                Edge middleware: CSP (nonce), Supabase session refresh
@@ -86,15 +90,39 @@ Defined in `src/types/holding.ts`. The DB schema was **normalized** (migration `
 - **`Holding`** — one lot, fully denormalized (ticker, units, prices, FX rates, asset type, source, dividend/bond fields…).
 - **`HoldingRow`** — a `Holding` plus computed SGD figures (`costSGD`, `valueSGD`, `assetGain`, `fxGain`, `totalPct`) and a `detail` block. **This is the main currency you pass around the UI.**
 - **`GroupedHolding`** — multiple lots of the same ticker aggregated into one row (for the grouped holdings view).
-- Asset types: `Equity | ETF | REIT | Gold | RE | Bond | T-Bill`. `FIXED_INCOME_TYPES` = {Bond, T-Bill}. Fund sources: `CPF | SRS | Cash`.
+- Asset types: `Equity | ETF | REIT | Gold | RE | Bond | T-Bill` (`ASSET_TYPES` array + `FIXED_INCOME_TYPES` = {Bond, T-Bill} in `types/holding.ts`). Fund sources: `CPF | SRS | Cash`.
+- ⚠️ **`instruments` rows are SHARED across users** (deduped by `(symbol, exchange_code)` via `upsertInstrument`). Symbol, currency, asset_type, name, flag, par/coupon/maturity all live on this shared row — editing them affects **every** user holding that security. `lots` and `holding_overrides` are the only per-user data. See the shared-instrument auth rule under Conventions.
+
+## Currency vs. listing exchange (important domain rule)
+
+Currency and exchange are **independent** — a security can be denominated in a currency other than its exchange's local one (e.g. **VWRA is listed on the LSE but denominated in USD**, not GBP). Never derive currency from the exchange.
+
+- A holding's stored **currency = the denomination of its price**. It's what drives FX→SGD conversion *and* the price-provider symbol suffix: `EODHD_EXCHANGE` maps **currency → exchange suffix** (`prices.ts`). If a ticker already carries an explicit suffix (`VWRA.LSE`), that dot wins and the currency map is bypassed — so the exchange suffix and the currency are set independently and must each be correct.
+- **Auto-heal:** the refresh route reads each ticker's authoritative currency from Yahoo (`fetchTickerCurrencies` in `prices.ts`) and repairs mismatched instruments via `correctInstrumentCurrency` (`data.ts`). It only corrects to a *clean, supported* currency that *differs* from storage; pence-quoted UK lines come back as `"GBp"` and are deliberately ignored (price is in pence, not pounds). Corrected currencies are folded into the FX-rate refresh set.
 
 ## API surface (`src/app/api/`)
 
-User-scoped (require auth): `holdings` (+ `/refresh` `/backfill` `/dividends` `/ratios`), `cash`, `cpf`, `settings`, `prices`, `quotes`, `fx` (+ `/candles`), `portfolio/analytics`, `portfolio/fx-series`, `news`, `analyst` (Anthropic streaming).
+User-scoped (require auth): `holdings` (+ `/refresh` `/backfill` `/dividends` `/ratios`), `cash`, `cpf`, `settings`, `account` (self-service account deletion — `DELETE`), `prices`, `quotes`, `fx` (+ `/candles`), `portfolio/analytics`, `portfolio/fx-series`, `news` (multi-source: Finnhub → Alpha Vantage → NewsAPI, with exchange-aware ticker remapping), `parse-pdf` (POST multipart/form-data — broker statement → trades array; supports FSMOne + DBS Vickers; handles true PDF and HTML-saved-as-PDF; 10 MB limit), `analyst` (Anthropic streaming).
 Reference lists: `currencies`, `exchanges` (built on the `createTableListGET` factory).
-Admin-only (require admin role): `admin/users/[id]`, `admin/currencies/[code]`, `admin/exchanges/[code]`, `admin/config/[key]`.
+Admin-only (require admin/superadmin role): `admin/users/[id]` (`PATCH` role change, `DELETE` user), `admin/currencies/[code]`, `admin/exchanges/[code]`, `admin/config/[key]`.
 
-**Server-side guard helpers** live in `src/lib/supabase/guards.ts`: `requireAuth()` and `requireAdmin()` return `{ user, error }` — return `error` early if present. Rate limiting via `enforceRateLimit()` (`rate-limit.ts`); provider on/off flags via `getProviderFlags()` (`app-config.ts`).
+**Server-side guard helpers** live in `src/lib/supabase/guards.ts`: `requireAuth()` returns `{ user, error }`; `requireAdmin()` returns `{ user, adminClient, role, error }` (the service-role client + the viewer's role). Return `error` early if present. Rate limiting via `enforceRateLimit()` (`rate-limit.ts`); provider on/off flags via `getProviderFlags()` (`app-config.ts`).
+
+## Auth, identity & roles
+
+User identity is **split across two stores** — the single most common source of confusion here:
+
+- **`auth.users`** (Supabase Auth schema) owns email, `created_at`, and the UUID. Read it only via the **admin/service-role client** (`auth.admin.listUsers`, `getUserById`); it is not in the `public` schema and the table editor hides it.
+- **`public.user_settings`** owns `display_name`, `base_currency`, and `role`. Rows are **created lazily on first login** (upsert), so an account can exist in `auth.users` with **no** `user_settings` row yet. The admin users table merges the two and defaults a missing role to `user`. Any write targeting `user_settings` by `user_id` must therefore **upsert, not update**, or it 404s on never-logged-in accounts.
+
+**Three-tier role model** — `src/lib/roles.ts` is the single source of truth (pure, import-free), used by **both** API routes and UI so they enforce the same matrix:
+
+- `user` → `admin` → `superadmin`, each a strict superset.
+- `is_admin()` (Postgres, `SECURITY DEFINER`) spans **both** admin tiers — every RLS policy keys off it, so superadmins inherit all admin data access without per-policy edits.
+- **Only superadmins** may change roles (promote/demote) or delete admins/superadmins; plain admins may delete ordinary `user`s only. Enforced by `canSetRole`/`canDeleteRole`; the UI hides exactly what the API would reject.
+- **Invariant: ≥1 superadmin always exists.** The `prevent_last_superadmin_loss` trigger fires `BEFORE UPDATE OF role` **and** `BEFORE DELETE` on `user_settings` as the race-proof backstop; routes also do a friendly pre-check. Column-level grants additionally `REVOKE` `role` writes from `authenticated`, so role can only change through the service-role admin routes.
+
+**User deletion is app-level, not a DB cascade.** `user_id` is `text` while `auth.users.id` is `uuid`, so no FK cascade is possible. `purgeUser` (`lib/supabase/delete-user.ts`) deletes the user's rows across every user-scoped table — `lots`, `holding_overrides`, `portfolio_snapshots`, `cash_balances`, `cpf_balances`, `rate_limits`, `user_settings` — **then** the Auth account (data-first, so a mid-way failure leaves a recoverable account, not orphaned data). Shared `instruments` and the `audit_log` trail are never purged. Two callers share it: admin `DELETE /api/admin/users/[id]` (role-gated, blocks self) and self-service `DELETE /api/account` (signs the session out afterward). ⚠️ The deletes are sequential, not a single transaction (the JS client can't span one) — best-effort with logging.
 
 ## Conventions & gotchas
 
@@ -104,6 +132,9 @@ Admin-only (require admin role): `admin/users/[id]`, `admin/currencies/[code]`, 
 - **`src/proxy.ts` is the middleware** (CSP nonce + Supabase auth refresh) — not a conventional name; don't delete it expecting a `middleware.ts`.
 - **`design/` is dead weight** — mockups, nothing in `src/` imports it.
 - **Reference-list pages** (currencies, exchanges) use the `useCachedList` hook + `createTableListGET` server factory. Reuse these rather than hand-rolling fetch+cache.
+- **Editing shared `instruments` is auth-gated by sole ownership.** `updateInstrumentForLot` (`data.ts`) only mutates the instrument when *no other user holds it* (cross-user lot count via the admin client — RLS hides other users' lots from the user-scoped client, so they'd otherwise look unshared). It returns `InstrumentEditResult` (`ok | not_found | shared | error`); the holdings `PATCH` maps `shared` → **409**. This stops one user from re-pointing/re-denominating a security other users hold (cross-tenant tampering). The two instrument-write paths have *deliberately different* trust models: the **user PATCH is sole-holder gated** (attacker-chosen value), while the **refresh auto-heal is ungated** because it writes only provider-reported market truth.
+- **The holding edit card sends instrument-level fields only when changed.** `DetailCard` in `holdings/page.tsx` diffs `name`/`ticker`/`currency`/`asset_type` against the original `HoldingRow` and omits unchanged ones — otherwise an unrelated lot edit (units, fees…) on a shared holding would be rejected by the sole-holder guard for a field the user never touched.
+- **Responsive data tables: drop low-priority columns, don't rely on horizontal scroll.** For narrow screens hide secondary columns by breakpoint (e.g. `max-bp600:hidden` on both `<th>` and `<td>`) so action columns stay visible; add `whitespace-nowrap` to headers to prevent label overlap. `overflow-x-auto` is only a fallback, and inside a flex column it needs `min-w-0` on the flex ancestor to engage (the dashboard page roots already set `min-w-0`). See `admin/page.tsx` users table.
 
 ## Known tech debt (see `report.md` for the full cleanup plan)
 

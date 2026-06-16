@@ -18,9 +18,11 @@ Live prices pull from global exchanges via EODHD (equities), CoinGecko (crypto),
 
 **Analysis** — AI portfolio commentary via Claude Haiku, streamed over SSE. The prompt is grounded with real 30-day sparklines and position sizes so scores aren't hallucinated.
 
-**Add / Import** — Form-based entry with exchange selector (34 global exchanges). CSV import for bulk adds.
+**Add / Import** — Form-based entry with exchange selector (34 global exchanges). CSV import for bulk adds. PDF import: upload a broker statement (FSMOne, DBS Vickers) and the app parses trades directly into the add form — supports both native PDFs and HTML files saved from a browser.
 
-**Admin** — User list, role toggle (admin ↔ user), currency and exchange activation. All writes go through the service-role client; demotion of the last admin is blocked at the database trigger level.
+**News** — Per-holding headlines pulled from up to three sources in priority order: Finnhub (best for US equities), Alpha Vantage (non-US equities, crypto, gold), and NewsAPI (global fallback). Headlines are tagged pos/neg/neu by keyword sentiment. Each source uses exchange-aware ticker remapping so e.g. `VWRA.LSE` reaches the right feed.
+
+**Admin** — User list, role toggle (admin ↔ user / superadmin), currency and exchange activation. Superadmins can promote/demote any role; plain admins can only delete ordinary users. Demotion of the last superadmin is blocked at the database trigger level.
 
 **Settings** — Display name, base currency (SGD, USD, EUR, GBP, JPY, AUD, HKD, INR). Currency switch is instant — all values are stored in SGD and converted client-side using live FX rates.
 
@@ -209,15 +211,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_ADMIN_KEY=<service-role-key>
 
 # Financial data
-FINNHUB_API_KEY=<key>    # free tier at finnhub.io — equity + FX sparklines
-EODHD_API_KEY=<key>      # paid (~$20/mo) — live global equity prices
-GOLDAPI_KEY=<key>        # free tier (100 req/mo) — XAU/USD spot
+FINNHUB_API_KEY=<key>        # free tier at finnhub.io — equity + FX sparklines, US news
+EODHD_API_KEY=<key>          # paid (~$20/mo) — live global equity prices
+GOLDAPI_KEY=<key>            # free tier (100 req/mo) — XAU/USD spot
+ALPHA_VANTAGE_API_KEY=<key>  # free tier (25 req/day) — non-US/crypto/gold news
+NEWS_API_KEY=<key>           # free tier — global headline fallback
 
 # AI
 ANTHROPIC_API_KEY=<key>  # console.anthropic.com — Analysis tab
 ```
 
-**Without optional keys:** The dashboard still works. Missing EODHD means equity prices stay at whatever was last manually entered. Missing Finnhub means sparkline charts are empty. Missing GoldAPI means gold holdings don't refresh. Missing Anthropic disables the Analysis tab.
+**Without optional keys:** The dashboard still works. Missing EODHD means equity prices stay at whatever was last manually entered. Missing Finnhub means sparkline charts are empty and US news is skipped. Missing GoldAPI means gold holdings don't refresh. Missing Anthropic disables the Analysis tab. Missing Alpha Vantage / NewsAPI means non-US holdings show fewer or no headlines.
 
 CoinGecko and Frankfurter are used automatically with no key.
 
@@ -275,8 +279,9 @@ src/
 │       ├── prices/route.ts         # Ticker price lookup
 │       ├── fx/                     # GET rate + /candles for FX Lab
 │       ├── quotes/route.ts         # Batch quote fetch
-│       ├── analyst/route.ts        # Claude Haiku SSE stream
-│       ├── news/route.ts           # Finnhub news with sentiment
+│       ├── analyst/route.ts        # Claude SSE stream
+│       ├── news/route.ts           # Multi-source news (Finnhub / Alpha Vantage / NewsAPI)
+│       ├── parse-pdf/route.ts      # Broker statement upload → trades array
 │       ├── settings/route.ts       # User preferences CRUD
 │       ├── currencies/route.ts     # Active currencies list
 │       ├── exchanges/route.ts      # Active exchanges list
@@ -309,6 +314,11 @@ src/
 │   │   ├── admin.ts                # Service-role client (SUPABASE_ADMIN_KEY)
 │   │   ├── data.ts                 # fetchHoldings, fetchUserSettings, upsertUserSettings
 │   │   └── guards.ts               # requireAuth(), requireAdmin()
+│   ├── pdf-parsers/
+│   │   ├── types.ts                # ParsedTrade, ParseResult interfaces
+│   │   ├── index.ts                # detectBroker() dispatcher
+│   │   ├── fsmone.ts               # FSMOne statement parser
+│   │   └── dbs-vickers.ts          # DBS Vickers statement parser
 │   ├── api/
 │   │   └── list-route.ts           # createTableListGET factory
 │   ├── portfolio.ts                # Series generation + FX math
@@ -353,14 +363,17 @@ All routes require an authenticated Supabase session (cookie). Admin routes addi
 | `/api/fx` | GET | user | FX rate for a currency pair |
 | `/api/fx/candles` | GET | user | 30-day FX candles for FX Lab |
 | `/api/quotes` | GET | user | Batch quote fetch |
-| `/api/analyst` | POST | user | Claude Haiku analysis (SSE stream) |
-| `/api/news` | GET | user | Finnhub news headlines |
+| `/api/analyst` | POST | user | Claude analysis (SSE stream) |
+| `/api/news` | GET | user | Multi-source headlines: Finnhub → Alpha Vantage → NewsAPI |
+| `/api/parse-pdf` | POST | user | Upload broker PDF → parsed trades array |
 | `/api/settings` | GET / POST | user | User preferences |
 | `/api/currencies` | GET | public | Active currencies list |
 | `/api/exchanges` | GET | public | Active exchanges list |
 | `/api/admin/currencies/[code]` | PATCH | admin | Toggle currency active flag |
 | `/api/admin/exchanges/[code]` | PATCH | admin | Toggle exchange active flag |
-| `/api/admin/users/[id]` | PATCH | admin | Toggle user role (admin ↔ user) |
+| `/api/admin/users/[id]` | PATCH | admin | Change user role (admin-gated) |
+| `/api/admin/users/[id]` | DELETE | admin | Delete user (role-gated; blocks self) |
+| `/api/account` | DELETE | user | Self-service account deletion |
 
 ---
 
@@ -374,4 +387,6 @@ All routes require an authenticated Supabase session (cookie). Admin routes addi
 | [GoldAPI](https://goldapi.io) | XAU/USD spot price | Yes | Yes (100 req/mo) |
 | [CoinGecko](https://coingecko.com) | Crypto prices + sparklines | No | — |
 | [Frankfurter](https://frankfurter.app) | Live FX rates | No | — |
-| [Anthropic](https://console.anthropic.com) | Claude Haiku analysis | Yes | No (pay per token) |
+| [Anthropic](https://console.anthropic.com) | Claude analysis (streaming) | Yes | No (pay per token) |
+| [Alpha Vantage](https://alphavantage.co) | Non-US / crypto / gold news | Yes | Yes (25 req/day) |
+| [NewsAPI](https://newsapi.org) | Global headline fallback | Yes | Yes (dev tier) |
