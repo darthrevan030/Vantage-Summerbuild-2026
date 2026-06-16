@@ -76,6 +76,8 @@ If the ONLY result is the line where it's defined, it's dead. If there are other
 | 13 | A third exchange-mapping table sits in the news route | `EODHD_TO_FINNHUB` in `src/app/api/news/route.ts` maps EODHD exchange codes → Finnhub prefixes. Related to `EODHD_CODE_REMAP` but different direction. Both could move to `src/lib/provider-symbols.ts` (see Step 3.2). |
 | 14 | `baseTicker()` utility duplicated in context | `src/app/api/news/route.ts` defines a local `baseTicker()` that strips the exchange suffix from dot-notation tickers. The same logic is inlined in `prices.ts` line 88. Candidate for `src/lib/provider-symbols.ts` or a small `src/lib/tickers.ts` shared util. |
 
+| 15 | Migration history is 10+ incremental files — hard to reproduce on a fresh Supabase project | `supabase/migrations/2026*.sql` — every incremental change since June 2026 is a separate file. A new account needs to apply all of them in order. The plan is to consolidate them into a single `00000000000000_baseline.sql` that contains the full schema in dependency order, all RLS policies, functions, grants, and seed data. See `C:\Users\smart\.claude\plans\i-think-the-main-calm-axolotl.md` §8. |
+
 ### C. Boilerplate (the same logic written by hand over and over)
 
 | # | Problem | Where |
@@ -260,6 +262,29 @@ The goal: take a 1000+ line page and move chunks of its UI into separate compone
    - Then extract the filter bar and the table-row rendering.
 
 > **Rule for Phase 5:** one extraction = one commit. Never extract two components in one go. If `tsc` shows 20 errors after an extraction, you cut too much or missed a prop — undo (`git checkout .`) and try a smaller chunk.
+
+---
+
+### PHASE 6 — Consolidate migrations into a single baseline (Easy once the schema is stable.)
+
+⚠️ **Do this last — only after the app is verified working end-to-end.** The goal is clean reproduction on a fresh Supabase project, not a behaviour change.
+
+**What to do:**
+
+1. Create `supabase/migrations/00000000000000_baseline.sql`. It must contain, in this order:
+   - All `CREATE TABLE IF NOT EXISTS` statements in FK-dependency order (extensions first, then tables without FK deps, then tables that reference them)
+   - `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` for every table that uses RLS
+   - All `CREATE POLICY` / `ALTER POLICY` statements for every table
+   - All functions: `is_admin()`, `prevent_last_superadmin_loss()`, `consume_rate_limit()`, and any others in the migration history
+   - Column-level grants (e.g. the `REVOKE / GRANT` block on `user_settings` for the `role` column)
+   - All seed data: exchanges (47 rows), currencies (rows with `rate_sgd` defaults), `app_config` keys
+2. Test it on a fresh Supabase project: apply ONLY `00000000000000_baseline.sql` in the SQL editor and verify the app works from scratch.
+3. Once verified, delete all `supabase/migrations/2026*.sql` files — the baseline replaces them entirely.
+4. Run `npm run build` to confirm nothing references the old migration files. Commit: `chore: consolidate migrations into baseline`.
+
+> **Tip for building the baseline:** run the existing migrations on a local Supabase stack (`npx supabase db reset`) and use `pg_dump --schema-only` to get a clean starting point, then add the seed inserts by hand.
+
+**Why this matters:** right now, setting up a new Supabase project requires applying 10+ files in exact timestamp order. The baseline makes it a single paste — easier for teammates, easier for staging environments, and no risk of accidentally applying migrations out of order.
 
 ---
 
