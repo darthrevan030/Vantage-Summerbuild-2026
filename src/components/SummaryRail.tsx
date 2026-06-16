@@ -11,10 +11,15 @@ const LABEL = "font-ui text-[11px] tracking-[.04em] text-secondary";
 
 export function SummaryRail() {
   const { hero, assetAllocation, fmtVal, fmtSigned } = usePortfolio();
-  const top = assetAllocation[0];
+  const top = assetAllocation.length > 0
+    ? assetAllocation.reduce((max, s) => s.value > max.value ? s : max, assetAllocation[0])
+    : null;
   const fxUp = hero.fxImpact >= 0;
   const dayUp = hero.dayChange >= 0;
   const invested = hero.total - hero.totalGain;
+
+  const [activeSlice, setActiveSlice] = useState<number | null>(null);
+  const activeData = activeSlice !== null ? assetAllocation[activeSlice] : null;
 
   // Sharpe lives in the snapshot-derived analytics, not the portfolio context.
   // Until it resolves (or if there isn't enough history), the metric stays
@@ -38,18 +43,34 @@ export function SummaryRail() {
       <div className="flex flex-col gap-3">
         <div className={LABEL}>Allocation</div>
         <div className="mt-1 grid place-items-center [filter:drop-shadow(0_6px_18px_rgba(150,110,255,0.16))]">
-          <Donut data={assetAllocation} size={132} thickness={18}>
-            {top && (
+          <Donut
+            data={assetAllocation}
+            size={132}
+            thickness={18}
+            highlight={activeSlice ?? -1}
+            onHover={(i) => setActiveSlice(i)}
+            onLeave={() => setActiveSlice(null)}
+          >
+            {activeData ? (
               <div>
-                <div className={LABEL}>{top.label}</div>
+                <div className={LABEL}>{activeData.label}</div>
                 <div className="font-mono text-[19px] font-semibold tracking-[-.02em]">
-                  {top.value}%
+                  {activeData.value}%
                 </div>
               </div>
+            ) : (
+              top && (
+                <div>
+                  <div className={LABEL}>{top.label}</div>
+                  <div className="font-mono text-[19px] font-semibold tracking-[-.02em]">
+                    {top.value}%
+                  </div>
+                </div>
+              )
             )}
           </Donut>
         </div>
-        <Legend data={assetAllocation} />
+        <Legend data={assetAllocation} size="sm" />
       </div>
 
       <div className="h-px bg-subtle" />
