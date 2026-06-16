@@ -48,4 +48,4 @@ next-env.d.ts
 # AI session memory (remember plugin)
 .remember/
 
-.claude/
+.claude
