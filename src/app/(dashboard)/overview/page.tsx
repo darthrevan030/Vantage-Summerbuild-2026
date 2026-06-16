@@ -194,6 +194,13 @@ export default function OverviewPage() {
   const geoTop = geoAllocation.reduce((max, s) => s.value > max.value ? s : max, geoAllocation[0]);
   const totalValue = hero.total;
 
+  // Donut interaction state — null means no slice active (center shows nothing)
+  const [acActive, setAcActive] = useState<number | null>(null);
+  const [geoActive, setGeoActive] = useState<number | null>(null);
+
+  const acSlice = acActive !== null ? assetAllocation[acActive] : null;
+  const geoSlice = geoActive !== null ? geoAllocation[geoActive] : null;
+
   // Cash + CPF live alongside holdings but aren't part of the portfolio context;
   // fetch them on mount. Each section hides entirely when there's no data.
   const [cash, setCash] = useState<CashBalance[]>([]);
@@ -385,16 +392,32 @@ export default function OverviewPage() {
             </span>
           </div>
           <div className="flex items-center gap-[22px] [&_svg]:[filter:drop-shadow(0_8px_22px_rgba(150,110,255,0.16))] max-bp600:flex-col max-bp600:items-center max-bp480:gap-3">
-            <Donut data={assetAllocation} size={150} thickness={22}>
-              {acTop && (
+            <Donut
+              data={assetAllocation}
+              size={150}
+              thickness={22}
+              highlight={acActive ?? -1}
+              onSlice={(i) => setAcActive(acActive === i ? null : i)}
+              onHover={(i) => setAcActive(i)}
+              onLeave={() => setAcActive(null)}
+            >
+              {acSlice ? (
                 <div>
                   <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
-                    {acTop.label}
+                    {acSlice.label}
                   </div>
                   <div className="font-mono text-[22px] font-semibold tracking-[-.02em] tabular-nums">
-                    {acTop.value}%
+                    {acSlice.value}%
                   </div>
                 </div>
+              ) : (
+                acTop && (
+                  <div className="opacity-30">
+                    <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
+                      hover to view
+                    </div>
+                  </div>
+                )
               )}
             </Donut>
             <Legend data={assetAllocation} layout="column" />
@@ -408,16 +431,32 @@ export default function OverviewPage() {
             <span className="font-ui text-[11px] text-secondary">exposure</span>
           </div>
           <div className="flex items-center gap-[22px] [&_svg]:[filter:drop-shadow(0_8px_22px_rgba(150,110,255,0.16))] max-bp600:flex-col max-bp600:items-center max-bp480:gap-3">
-            <Donut data={geoAllocation} size={150} thickness={22}>
-              {geoTop && (
+            <Donut
+              data={geoAllocation}
+              size={150}
+              thickness={22}
+              highlight={geoActive ?? -1}
+              onSlice={(i) => setGeoActive(geoActive === i ? null : i)}
+              onHover={(i) => setGeoActive(i)}
+              onLeave={() => setGeoActive(null)}
+            >
+              {geoSlice ? (
                 <div>
                   <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
-                    {geoTop.label}
+                    {geoSlice.label}
                   </div>
                   <div className="font-mono text-[22px] font-semibold tracking-[-.02em] tabular-nums">
-                    {geoTop.value}%
+                    {geoSlice.value}%
                   </div>
                 </div>
+              ) : (
+                geoTop && (
+                  <div className="opacity-30">
+                    <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
+                      hover to view
+                    </div>
+                  </div>
+                )
               )}
             </Donut>
             <Legend data={geoAllocation} layout="column" />
@@ -532,7 +571,7 @@ export default function OverviewPage() {
             <div className="flex items-start gap-[9px]">
               <i
                 className="mt-1 size-2.5 rounded-[3px]"
-                style={{ background: "var(--fx-positive)" }}
+                style={{ background: hero.fxImpact >= 0 ? "var(--fx-positive)" : "var(--fx-negative)" }}
               />
               <div>
                 <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
@@ -556,16 +595,14 @@ export default function OverviewPage() {
                 <div className="font-ui text-[11px] tracking-[.04em] text-secondary">
                   Total gain
                 </div>
-                <div className="mt-0.5 font-mono text-base font-semibold tabular-nums max-bp480:text-[14px]">
+                <div
+                  className="mt-0.5 font-mono text-base font-semibold tabular-nums max-bp480:text-[14px]"
+                  style={{
+                    color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+                  }}
+                >
                   {fmtSigned(hero.totalGain)}{" "}
-                  <span
-                    style={{
-                      color:
-                        hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
-                    }}
-                  >
-                    {pct(hero.totalGainPct)}
-                  </span>
+                  <span>{pct(hero.totalGainPct)}</span>
                 </div>
               </div>
             </div>
