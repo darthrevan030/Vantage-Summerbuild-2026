@@ -49,101 +49,121 @@ function normalizeAssetType(raw: string): string {
   return "Equity";
 }
 
+// Parentheticals that are NOT tickers (exchange codes, currencies, legal refs)
+const NON_TICKER_PARENS = new Set([
+  "SGX","LSE","NYSE","NASDAQ","HKEX","ASX","TSE","XETRA","HK","BURSA",
+  "SGD","USD","EUR","GBP","HKD","AUD","JPY","INR",
+  "RSP","CPF","SRS","GST","CDP","MAS",
+]);
+
 // ── ETF / Stock Confirmation Note ────────────────────────────────────────────
+// pdf-parse v1 (pdfjs-dist v2) extracts columns right-to-left on some pages,
+// so the fine-print disclaimer may appear BEFORE the contract table in the
+// linearised text. We therefore anchor on the (TICKER) parenthetical and the
+// contract number independently rather than relying on positional order.
 
 function parseEtfConfirmationNote(text: string): ParseResult {
   const warnings: string[] = [];
 
-  // Contract number is the key anchor (BSTK…, SSTK…, etc.)
+  // ── Contract number (BSTK…, SSTK…, BSHARE…, etc.) ───────────────────────
   const contractMatch = text.match(/\b([A-Z]{3,}\d{10,})\b/);
   if (!contractMatch) {
     warnings.push("No contract number found in confirmation note.");
     return { broker: "FSMOne", docType: "etf-confirmation", trades: [], warnings };
   }
-
   const contractNo = contractMatch[1];
-  const startIdx = text.indexOf(contractNo);
+  const contractIdx = text.indexOf(contractNo);
 
-  // Date appears just before the contract number in the linearized text
-  const pre = text.substring(Math.max(0, startIdx - 300), startIdx);
-  const dateMatch = pre.match(/(\d{2} \w{3} \d{4})\s*\n?\s*$/);
+  // ── Date: any "DD MMM YYYY" in the whole document ────────────────────────
+  const dateMatch = text.match(/(\d{2}\s+\w{3,9}\s+\d{4})/);
   const buyDate = dateMatch ? parseDate(dateMatch[1]) : "";
   if (!buyDate) warnings.push("Could not parse transaction date.");
 
-  // All text after the contract number
-  const post = text.substring(startIdx + contractNo.length);
-
-  // Exchange code
-  const exchMatch = EXCHANGE_PATTERN.exec(post);
-  const rawExchange = exchMatch?.[1] ?? "";
-  const exchange = rawExchange ? (EXCHANGE_MAP[rawExchange] ?? rawExchange) : "";
-  if (!rawExchange) warnings.push("Could not detect exchange.");
-
-  // Security name block: between exchange code and "RSP" / "Cash Account"
-  const afterExchange = rawExchange
-    ? post.substring(post.indexOf(rawExchange) + rawExchange.length)
-    : post;
-  const payIdx = afterExchange.search(/\bRSP\b|Cash Account/);
-  const secBlock = afterExchange.substring(0, payIdx > 0 ? payIdx : 300);
-
-  // Ticker is the last (SYMBOL) in the block, e.g. "(SPYL)"
-  const tickerMatches = [...secBlock.matchAll(/\(([A-Z0-9]{2,6})\)/g)];
-  const ticker = tickerMatches.length > 0
-    ? tickerMatches[tickerMatches.length - 1][1]
+  // ── Ticker: find (SYMBOL) in whole text, skip known non-tickers ──────────
+  // Use ALL matches and take the last valid one; disclaimers tend to have
+  // "(SGX)" or "(the Company)" which are filtered below.
+  const allParens = [...text.matchAll(/\(([A-Z0-9]{2,8})\)/g)];
+  const tickerCandidates = allParens.filter((m) => !NON_TICKER_PARENS.has(m[1]));
+  const ticker = tickerCandidates.length > 0
+    ? tickerCandidates[tickerCandidates.length - 1][1]
     : "";
 
-  // Clean name: remove ticker paren, normalize whitespace
-  const name = secBlock
-    .replace(/\([A-Z0-9]{2,6}\)\s*$/, "")
-    .replace(/[\n\r]+/g, " ")
-    .trim()
-    || ticker
-    || "Unknown";
+  // ── Security name: text on the same logical line as (TICKER) ─────────────
+  let name = ticker || "Unknown";
+  let exchange = "";
 
-  // After payment method, parse quantities / prices / FX rate
-  const afterPayment = payIdx > 0 ? afterExchange.substring(payIdx) : afterExchange;
+  if (ticker) {
+    const tickerTag = `(${ticker})`;
+    const tickerPos = text.lastIndexOf(tickerTag);
+    // Grab up to 300 chars before the ticker paren
+    const before = text.substring(Math.max(0, tickerPos - 300), tickerPos);
+    // Split by newline or 2+ spaces; last non-trivial segment = name
+    const segments = before.split(/\n|\r|\s{2,}/).map((s) => s.trim()).filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      if (
+        seg.length > 3 &&
+        !EXCHANGE_PATTERN.test(seg) &&
+        !/^\d[\d.,\s]*$/.test(seg) &&
+        !/^(RSP|Cash|Account|SGD|USD|EUR|GBP|HKD|AUD)$/i.test(seg)
+      ) {
+        name = seg;
+        break;
+      }
+    }
 
-  // All currency+amount occurrences: "USD 18.365287", "SGD 980.96"
-  const ccyAmounts = [...afterPayment.matchAll(
-    /\b(USD|SGD|EUR|GBP|HKD|AUD)\s+([\d,]+\.?\d*)/g,
-  )];
+    // Exchange: nearest EXCHANGE_PATTERN match before (TICKER) in the text
+    const exchMatch = EXCHANGE_PATTERN.exec(before);
+    if (exchMatch) exchange = EXCHANGE_MAP[exchMatch[1]] ?? exchMatch[1];
+  }
+
+  // Fallback exchange: scan the 500 chars around the contract number
+  if (!exchange) {
+    const contractCtx = text.substring(
+      Math.max(0, contractIdx - 100),
+      contractIdx + 500,
+    );
+    const exchMatch = EXCHANGE_PATTERN.exec(contractCtx);
+    if (exchMatch) exchange = EXCHANGE_MAP[exchMatch[1]] ?? exchMatch[1];
+  }
+  if (!exchange) warnings.push("Could not detect exchange.");
+
+  // ── Prices: scan the whole document for "CCY AMOUNT" ────────────────────
+  const ccyAmounts = [
+    ...text.matchAll(/\b(USD|SGD|EUR|GBP|HKD|AUD)\s+([\d,]+\.\d+)/g),
+  ];
 
   let currency = "SGD";
   let price = 0;
   let fxRate = 1;
 
   if (ccyAmounts.length > 0) {
-    // First non-SGD amount = transacted price in asset currency
+    // Prefer the first non-SGD amount as the asset price
     const priceEntry = ccyAmounts.find((m) => m[1] !== "SGD") ?? ccyAmounts[0];
     currency = priceEntry[1];
     price = parseFloat(priceEntry[2].replace(/,/g, ""));
   }
 
-  // Quantity: standalone decimal just before the first currency+amount
-  const firstCcyIdx = ccyAmounts.length > 0
-    ? afterPayment.indexOf(ccyAmounts[0][0])
-    : afterPayment.length;
-  const beforeFirst = afterPayment.substring(0, firstCcyIdx);
-  const qtyMatch = beforeFirst.match(/\b(\d+\.?\d*)\s*$/);
-  const units = qtyMatch ? parseFloat(qtyMatch[1]) : 0;
+  // ── Units: number immediately before the first CCY amount ────────────────
+  let units = 0;
+  if (ccyAmounts.length > 0) {
+    const firstCcyPos = text.indexOf(ccyAmounts[0][0]);
+    const beforeCcy = text.substring(Math.max(0, firstCcyPos - 200), firstCcyPos);
+    const qtyMatch = beforeCcy.match(/\b(\d+\.?\d*)\s*[\n\r\s]*$/);
+    if (qtyMatch) units = parseFloat(qtyMatch[1]);
+  }
   if (units <= 0) warnings.push("Could not parse quantity.");
 
-  // FX rate: small decimal after the SGD settlement amount
-  // FSMOne shows it as SGD/XXX rate (e.g. 0.774384 = how many USD per 1 SGD)
+  // ── FX rate: small decimal after the last SGD amount ─────────────────────
   if (currency !== "SGD") {
     const sgdAmounts = ccyAmounts.filter((m) => m[1] === "SGD");
     if (sgdAmounts.length > 0) {
-      const lastSgd = sgdAmounts[sgdAmounts.length - 1][0];
-      const afterSgd = afterPayment.substring(
-        afterPayment.lastIndexOf(lastSgd) + lastSgd.length,
-      );
+      const lastSgdStr = sgdAmounts[sgdAmounts.length - 1][0];
+      const afterSgd = text.substring(text.lastIndexOf(lastSgdStr) + lastSgdStr.length);
       const fxMatch = afterSgd.match(/\b(\d+\.\d{4,8})\b/);
       if (fxMatch) {
         const candidate = parseFloat(fxMatch[1]);
-        // Typical SGD-based FX rates are 0.1–5; convert to buy_fx_rate (SGD per CCY)
-        if (candidate > 0.05 && candidate < 10) {
-          fxRate = 1 / candidate;
-        }
+        if (candidate > 0.05 && candidate < 10) fxRate = 1 / candidate;
       }
     }
     if (fxRate === 1) {
