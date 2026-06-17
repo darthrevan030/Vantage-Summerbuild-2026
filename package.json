@@ -1,6 +1,6 @@
 {
-  "name": "finance-dashboard-summerbuild-2026",
-  "version": "0.1.0",
+  "name": "Vantage-summerbuild-2026",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
