@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/guards";
 import { enforceRateLimit } from "@/lib/supabase/rate-limit";
 import { parsePdfText } from "@/lib/pdf-parsers";
-import { fetchEodhdAssetTypes } from "@/lib/prices";
+import { fetchEodhdAssetTypes, resolveTickersFromNames } from "@/lib/prices";
+import { fetchCurrentSgdRates } from "@/lib/providers/fx";
 
 export async function POST(req: NextRequest) {
   const { error } = await requireAuth();
@@ -84,18 +85,45 @@ export async function POST(req: NextRequest) {
 
   const result = parsePdfText(pdfText);
 
-  // Enrich asset types from EODHD: broker statements (esp. DBS Vickers contract
-  // notes) often lack an asset descriptor, so an ETF lands as "Equity". This
-  // only ever upgrades to ETF (EODHD reports REITs as stock), so it never
-  // clobbers a type the parser detected from statement text. Best-effort — a
-  // failure or missing key leaves parser defaults for the refresh heal to fix.
   if (result.trades.length > 0) {
+    // Resolve missing tickers from company names. The DBS Vickers holdings
+    // snapshot lists names but no symbols; we fill only confident Yahoo matches
+    // and leave the rest blank for the user to complete in the import rows.
+    const needTicker = result.trades.filter((t) => !t.ticker);
+    if (needTicker.length > 0) {
+      const resolved = await resolveTickersFromNames(needTicker.map((t) => t.name));
+      for (const t of needTicker) {
+        const sym = resolved[t.name];
+        if (sym) t.ticker = sym;
+      }
+    }
+
+    // Enrich asset types from EODHD: broker statements (esp. DBS Vickers contract
+    // notes) often lack an asset descriptor, so an ETF lands as "Equity". This
+    // only ever upgrades to ETF (EODHD reports REITs as stock), so it never
+    // clobbers a type the parser detected from statement text. Best-effort — a
+    // failure or missing key leaves parser defaults for the refresh heal to fix.
     const etfTypes = await fetchEodhdAssetTypes(
       result.trades.map((t) => t.ticker),
     );
     for (const trade of result.trades) {
       const detected = etfTypes[trade.ticker];
       if (detected) trade.asset_type = detected;
+    }
+
+    // Fill FX rate for non-SGD trades that carry none (the holdings snapshot has
+    // no exchange rate). Without this the import coerces buy_fx_rate to 1, which
+    // would wrongly treat a USD position as SGD. Best-effort; field stays
+    // editable. buy_fx_rate is SGD per 1 unit of the asset currency.
+    const needFx = result.trades.filter(
+      (t) => t.buy_fx_rate === 0 && t.currency !== "SGD",
+    );
+    if (needFx.length > 0) {
+      const rates = await fetchCurrentSgdRates(needFx.map((t) => t.currency));
+      for (const t of needFx) {
+        const rate = rates[t.currency];
+        if (rate) t.buy_fx_rate = Math.round(rate * 10000) / 10000;
+      }
     }
   }
 

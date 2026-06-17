@@ -133,6 +133,93 @@ export async function fetchEodhdAssetTypes(
   return out;
 }
 
+// Corporate-form / share-class noise dropped before name matching, so
+// "ALPHABET INC CAP STK CL C" and "Alphabet Inc." compare on {ALPHABET}.
+// Distinguishing nouns (TRUST, HOLDINGS, GROUP, FUNDING…) are deliberately
+// KEPT — dropping them collapses "Northern Trust" → "Northern" and matches the
+// wrong company. Single letters A/B/C are share-class markers, treated as noise.
+const NAME_NOISE = new Set([
+  "INC", "CORP", "CORPORATION", "LTD", "LIMITED", "PLC", "CO", "COMPANY",
+  "ORD", "ADR", "CL", "CLASS", "STK", "CAP", "NV", "SA", "AG", "THE",
+  "ETF", "NEW", "RG", "NY", "COM", "A", "B", "C",
+]);
+function nameTokens(s: string): Set<string> {
+  return new Set(
+    s.toUpperCase().replace(/[^A-Z0-9 ]/g, " ").split(/\s+/)
+      .filter((t) => t && !NAME_NOISE.has(t)),
+  );
+}
+function tokenOverlap(query: Set<string>, hit: Set<string>): number {
+  if (query.size === 0) return 0;
+  let n = 0;
+  for (const t of query) if (hit.has(t)) n++;
+  return n / query.size;
+}
+
+/**
+ * Resolve company names → ticker symbols via Yahoo Finance search. Used by the
+ * DBS Vickers holdings import, whose "Securities Holdings" table carries names
+ * but no symbols. Conservative by design: a ticker is filled only when Yahoo
+ * returns an equity/ETF match on a US (unsuffixed) listing whose name overlaps
+ * the query — otherwise the name is left unresolved (blank) for the user to fill
+ * in the editable import rows, rather than guessing the wrong security or share
+ * class. Best-effort: returns {} on any failure. Keys are the ORIGINAL names.
+ */
+export async function resolveTickersFromNames(
+  names: string[],
+): Promise<Record<string, string>> {
+  const unique = [...new Set(names.filter(Boolean))];
+  if (unique.length === 0) return {};
+
+  const out: Record<string, string> = {};
+  await Promise.all(
+    unique.map(async (name) => {
+      try {
+        // Search on the cleaned token string: share-class / listing qualifiers
+        // ("CAP STK CL C", "ADR", "NV NY RG-NEW") derail Yahoo's fuzzy search,
+        // so "ALPHABET INC CAP STK CL C" is queried as "ALPHABET".
+        const tokens = nameTokens(name);
+        const query = tokens.size > 0 ? [...tokens].join(" ") : name;
+        const res = await yahooFinance.search(query, { quotesCount: 6, newsCount: 0 });
+        const quotes = (res?.quotes ?? []) as Array<{
+          symbol?: string; shortname?: string; longname?: string;
+          quoteType?: string; isYahooFinance?: boolean;
+        }>;
+        for (const q of quotes) {
+          if (!q.isYahooFinance || !q.symbol) continue;
+          if (q.quoteType !== "EQUITY" && q.quoteType !== "ETF") continue;
+          if (q.symbol.includes(".")) continue; // US listings are unsuffixed
+          // Strict: every meaningful query token must appear in the matched
+          // name. Rejects wrong-company hits (e.g. "Northern" → Northern Dynasty
+          // when we wanted Northern Trust); blanks stay blank for manual entry.
+          const hitTokens = nameTokens(`${q.longname ?? ""} ${q.shortname ?? ""}`);
+          if (tokenOverlap(tokens, hitTokens) === 1) {
+            out[name] = q.symbol.toUpperCase();
+            break;
+          }
+        }
+      } catch {
+        // ignore — leave the name unresolved for manual entry
+      }
+    }),
+  );
+
+  // Drop any ticker claimed by more than one distinct name — almost always
+  // share-class siblings (Alphabet "CL A" vs "CL C" both reduce to "ALPHABET"),
+  // which search can't tell apart. Blank them rather than write a wrong class.
+  const claimants = new Map<string, string[]>();
+  for (const [n, sym] of Object.entries(out)) {
+    const list = claimants.get(sym) ?? [];
+    list.push(n);
+    claimants.set(sym, list);
+  }
+  for (const [, names_] of claimants) {
+    if (names_.length > 1) for (const n of names_) delete out[n];
+  }
+
+  return out;
+}
+
 /**
  * Returns the Yahoo Finance symbol for a ticker.
  * US stocks: bare ticker (no suffix). All others: ticker + exchange suffix.

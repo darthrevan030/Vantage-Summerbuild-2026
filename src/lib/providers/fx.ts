@@ -35,6 +35,34 @@ export async function fetchFxHistoryRange(
 }
 
 /**
+ * Current SGD-per-foreign rates via Frankfurter's latest endpoint. Used to fill
+ * `buy_fx_rate` for broker-statement imports that carry a price but no FX rate
+ * (e.g. the DBS Vickers holdings snapshot). Frankfurter gives foreign-per-SGD,
+ * so we invert. Returns {} on any failure (caller leaves the rate unset).
+ */
+export async function fetchCurrentSgdRates(
+  currencies: string[],
+): Promise<Record<string, number>> {
+  const foreign = [...new Set(currencies.filter((c) => c && c !== "SGD"))];
+  if (foreign.length === 0) return {};
+  try {
+    const r = await fetch(
+      `https://api.frankfurter.app/latest?from=SGD&to=${foreign.join(",")}`,
+      { next: { revalidate: 0 } },
+    );
+    if (!r.ok) return {};
+    const data = await r.json();
+    const out: Record<string, number> = {};
+    for (const [ccy, rate] of Object.entries(data.rates as Record<string, number>)) {
+      if (typeof rate === "number" && rate > 0) out[ccy] = 1 / rate; // SGD per foreign
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Guarantee the fx_history cache covers `currencies` over [from, to], fetching
  * any that are missing or under-covered from Frankfurter and persisting them.
  * Returns the merged per-currency history: { ccy: { date: sgd_per_foreign } }.
