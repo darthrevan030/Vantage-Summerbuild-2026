@@ -4,6 +4,8 @@ A self-hosted finance dashboard for tracking a multi-currency, multi-exchange in
 
 Live prices pull from global exchanges via EODHD (equities), CoinGecko (crypto), and GoldAPI. FX rates come from Frankfurter. Portfolio analysis streams through Claude Sonnet or any OpenRouter model. Everything is stored in your own Supabase project — no third-party sync, no shared data.
 
+**[Watch the demo →](https://youtu.be/wSM0IP3X5fg)**
+
 ---
 
 ## What it does
