@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const { error } = await requireAuth();
   if (error) return error;
 
-  const limited = await enforceRateLimit("fx-candles", 20, 60);
+  const limited = await enforceRateLimit("fx-candles", 20, 60, { failClosed: true });
   if (limited) return limited;
 
   const ccy = req.nextUrl.searchParams.get("ccy")?.toUpperCase();
