@@ -37,9 +37,25 @@ export async function POST(req: NextRequest) {
 
   if (isPdf) {
     try {
-      // pdfjs-dist legacy build has no native dependencies — works on Vercel.
-      // pdf-parse v2 pulls in @napi-rs/canvas (native binary) which fails on
-      // Linux serverless because only the Windows binary was installed locally.
+      // pdfjs-dist v5 calls `new DOMMatrix()` at module init — a browser global
+      // absent in Node.js. Stub it before loading so the module initialises, then
+      // use getTextContent() which never exercises the real matrix math path.
+      if (typeof globalThis.DOMMatrix === "undefined") {
+        (globalThis as unknown as Record<string, unknown>).DOMMatrix = class {
+          a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+          is2D = true; isIdentity = true;
+          constructor(_?: unknown) {}
+          scale() { return this; }
+          translate() { return this; }
+          multiply() { return this; }
+          inverse() { return this; }
+          transformPoint(p: Record<string, number>) { return { x: p.x ?? 0, y: p.y ?? 0, z: 0, w: 1 }; }
+          toFloat32Array() { return new Float32Array(16); }
+          toFloat64Array() { return new Float64Array(16); }
+          toString() { return "matrix(1, 0, 0, 1, 0, 0)"; }
+          toJSON() { return {}; }
+        };
+      }
       const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjsLib.GlobalWorkerOptions.workerSrc = "";
       const doc = await pdfjsLib.getDocument({
