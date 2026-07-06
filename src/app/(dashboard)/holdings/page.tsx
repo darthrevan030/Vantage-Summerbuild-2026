@@ -819,6 +819,8 @@ export default function HoldingsPage() {
   );
   const [confirmLot, setConfirmLot] = useState<string | null>(null);
   const [deletingLot, setDeletingLot] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   async function handleDeleteLot(id: string) {
@@ -836,6 +838,33 @@ export default function HoldingsPage() {
     } finally {
       setDeletingLot(null);
       setConfirmLot(null);
+    }
+  }
+
+  async function handleDeleteAll() {
+    // Two-click confirm: first click arms the button, second click fires.
+    // The 5-second auto-cancel effect below resets the state if the user
+    // walks away.
+    if (!confirmDeleteAll) {
+      setConfirmDeleteAll(true);
+      return;
+    }
+    setDeletingAll(true);
+    try {
+      const res = await fetch("/api/holdings?all=1", { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? "Delete failed");
+      }
+      const data = (await res.json().catch(() => ({}))) as { deleted?: number };
+      const n = data.deleted ?? 0;
+      toast.success(`Removed ${n} lot${n === 1 ? "" : "s"}`);
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeletingAll(false);
+      setConfirmDeleteAll(false);
     }
   }
 
@@ -870,6 +899,14 @@ export default function HoldingsPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Disarm the delete-all confirmation after 5s so a stray first click can't
+  // sit primed indefinitely.
+  useEffect(() => {
+    if (!confirmDeleteAll) return;
+    const t = setTimeout(() => setConfirmDeleteAll(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirmDeleteAll]);
 
   const key = (h: HoldingRow) => h.id;
 
@@ -1099,6 +1136,38 @@ export default function HoldingsPage() {
             {refreshing ? "Refreshing…" : "Refresh Prices"}
           </span>
         </button>
+        {holdings.length > 0 && (
+          <button
+            className={
+              "flex cursor-pointer items-center gap-[7px] rounded-[9px] border px-[13px] py-2 font-ui text-[12.5px] transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 " +
+              (confirmDeleteAll
+                ? "border-[color:var(--loss)] bg-[rgba(239,68,68,0.12)] text-loss"
+                : "border-subtle bg-surface text-secondary hover:border-[color:var(--loss)] hover:text-loss")
+            }
+            onClick={handleDeleteAll}
+            disabled={deletingAll}
+            title={
+              confirmDeleteAll ? "Click again to confirm" : "Delete every holding"
+            }
+          >
+            <Icon
+              name={deletingAll ? "loader" : "x"}
+              size={15}
+              style={
+                deletingAll
+                  ? { animation: "spin 1s linear infinite" }
+                  : undefined
+              }
+            />
+            <span className="font-ui">
+              {deletingAll
+                ? "Deleting…"
+                : confirmDeleteAll
+                  ? `Confirm delete ${holdings.length}?`
+                  : "Delete All"}
+            </span>
+          </button>
+        )}
         {refreshMsg && (
           <span className="font-ui text-secondary text-[11px] tracking-[.04em] opacity-70 transition-opacity duration-300">
             {refreshMsg}
