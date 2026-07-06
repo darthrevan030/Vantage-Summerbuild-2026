@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/guards";
 import { enforceRateLimit } from "@/lib/supabase/rate-limit";
 import { parsePdfText } from "@/lib/pdf-parsers";
-import { fetchEodhdAssetTypes, resolveTickersFromNames } from "@/lib/prices";
+import {
+  fetchEodhdAssetTypes,
+  fetchTickerMeta,
+  resolveTickersFromNames,
+} from "@/lib/prices";
 import { fetchCurrentSgdRates } from "@/lib/providers/fx";
 
 export async function POST(req: NextRequest) {
@@ -109,6 +113,29 @@ export async function POST(req: NextRequest) {
     for (const trade of result.trades) {
       const detected = etfTypes[trade.ticker];
       if (detected) trade.asset_type = detected;
+    }
+
+    // Yahoo fallback for anything EODHD didn't classify (missing API key, ticker
+    // not in EODHD's universe, etc.). Same "only upgrade to ETF" semantics as
+    // the refresh-route auto-heal — see mapYahooQuoteType in prices.ts for why
+    // we never trust Yahoo's "EQUITY" (REITs lump under it). This makes the
+    // first-insert asset type correct instead of waiting for the next refresh
+    // to run correctInstrumentAssetType. Best-effort; parser default stays if
+    // Yahoo also can't answer.
+    const needYahoo = result.trades.filter(
+      (t) => t.ticker && !etfTypes[t.ticker],
+    );
+    if (needYahoo.length > 0) {
+      const tickerCurrency: Record<string, string> = {};
+      for (const t of needYahoo) tickerCurrency[t.ticker] = t.currency;
+      const meta = await fetchTickerMeta(
+        needYahoo.map((t) => t.ticker),
+        tickerCurrency,
+      );
+      for (const trade of needYahoo) {
+        const detected = meta[trade.ticker]?.assetType;
+        if (detected) trade.asset_type = detected;
+      }
     }
 
     // Fill FX rate for non-SGD trades that carry none (the holdings snapshot has
