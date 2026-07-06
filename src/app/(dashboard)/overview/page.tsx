@@ -207,6 +207,11 @@ export default function OverviewPage() {
   const [cpf, setCpf] = useState<CpfData | null>(null);
   const [lifeRates, setLifeRates] = useState<CpfLifeRates | null>(null);
   const [cpfPlan, setCpfPlan] = useState<CpfPlan>("standard");
+  // Hypothetical RA balance for the estimator — seeded from cpf.ra when it
+  // loads (so returning users see their real projection immediately) but
+  // fully editable so users without a stored RA balance can model what-if
+  // scenarios. Empty string = 0 projection.
+  const [hypoRa, setHypoRa] = useState<string>("");
 
   useEffect(() => {
     let alive = true;
@@ -227,6 +232,7 @@ export default function OverviewPage() {
           };
           setCpf(balances);
           setLifeRates(lr);
+          if (balances?.ra) setHypoRa(String(balances.ra));
         }
       } catch {
         /* network/auth errors leave the sections hidden */
@@ -727,52 +733,82 @@ export default function OverviewPage() {
             ))}
           </div>
 
-          {lifeRates && cpf.ra > 0 && (
-            <div className="mt-4 border-t border-subtle pt-4">
-              <div className="mb-3 flex items-center justify-between gap-2 max-bp480:flex-wrap">
-                <span className="flex items-center gap-1 font-ui text-[12px] font-semibold text-primary">
-                  Projected CPF LIFE payout
-                  <InfoTip text="Estimated monthly payout if your current Retirement Account balance were annuitised under CPF LIFE, by payout start age. No future contributions or interest growth are assumed." />
-                </span>
-                <div className="flex gap-1.5">
-                  {(["standard", "basic"] as const).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setCpfPlan(p)}
-                      className={
-                        "cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] capitalize transition-all duration-150 " +
-                        (cpfPlan === p
-                          ? "border-gold-soft bg-wash text-gold"
-                          : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
-                      }
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3 max-bp480:grid-cols-1">
-                {PAYOUT_AGES.map((age) => (
-                  <div
-                    className="flex flex-col gap-1 rounded-[12px] border border-subtle bg-elevated px-3.5 py-3"
-                    key={age}
-                  >
-                    <span className="font-ui text-[11px] tracking-[.04em] text-secondary">
-                      from age {age}
-                    </span>
-                    <span className="font-mono text-[16px] font-semibold tabular-nums text-gold">
-                      {fmtVal(
-                        projectCpfPayout(cpf.ra, lifeRates[cpfPlan], age),
-                      )}
-                      <span className="ml-1 font-ui text-[11px] font-normal text-secondary">
-                        /mo
-                      </span>
-                    </span>
-                  </div>
-                ))}
-              </div>
+        </div>
+      )}
+
+      {/* CPF LIFE estimator — always shown when rates are loaded, so users
+          without a stored CPF balance can still model a hypothetical RA.
+          Prefilled from cpf.ra when present (see hypoRa seeding above). */}
+      {lifeRates && (
+        <div
+          className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3"
+          style={{ animationDelay: ".28s" }}
+        >
+          <div className="mb-4 flex items-center justify-between gap-2 max-bp480:flex-wrap">
+            <span className="flex items-center gap-1 text-[13px] font-semibold tracking-[.01em] text-primary">
+              CPF LIFE payout estimator
+              <InfoTip text="Estimated monthly payout if the entered Retirement Account balance were annuitised under CPF LIFE, by payout start age. No future contributions or interest growth are assumed." />
+            </span>
+            <div className="flex gap-1.5">
+              {(["standard", "basic"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCpfPlan(p)}
+                  className={
+                    "cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] capitalize transition-all duration-150 " +
+                    (cpfPlan === p
+                      ? "border-gold-soft bg-wash text-gold"
+                      : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+                  }
+                >
+                  {p}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
+          <div className="mb-4 flex flex-col gap-1">
+            <label
+              htmlFor="hypo-ra"
+              className="font-ui text-[11px] tracking-[.04em] text-secondary"
+            >
+              Retirement Account balance (SGD)
+            </label>
+            <input
+              id="hypo-ra"
+              type="number"
+              min="0"
+              step="1000"
+              inputMode="decimal"
+              value={hypoRa}
+              onChange={(e) => setHypoRa(e.target.value)}
+              placeholder="e.g. 205800"
+              className="w-full max-w-[240px] rounded-[8px] border border-subtle bg-elevated px-3 py-2 font-mono text-[14px] tabular-nums text-primary outline-none transition-[border-color] duration-150 focus:border-gold-soft"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3 max-bp480:grid-cols-1">
+            {PAYOUT_AGES.map((age) => (
+              <div
+                className="flex flex-col gap-1 rounded-[12px] border border-subtle bg-elevated px-3.5 py-3"
+                key={age}
+              >
+                <span className="font-ui text-[11px] tracking-[.04em] text-secondary">
+                  from age {age}
+                </span>
+                <span className="font-mono text-[16px] font-semibold tabular-nums text-gold">
+                  {fmtVal(
+                    projectCpfPayout(
+                      Number(hypoRa) || 0,
+                      lifeRates[cpfPlan],
+                      age,
+                    ),
+                  )}
+                  <span className="ml-1 font-ui text-[11px] font-normal text-secondary">
+                    /mo
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
