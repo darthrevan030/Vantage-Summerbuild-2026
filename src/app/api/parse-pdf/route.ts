@@ -8,6 +8,7 @@ import {
   resolveTickersFromNames,
 } from "@/lib/prices";
 import { fetchCurrentSgdRates } from "@/lib/providers/fx";
+import { SUPPORTED_CURRENCIES } from "@/lib/formatters";
 
 export async function POST(req: NextRequest) {
   const { error } = await requireAuth();
@@ -115,26 +116,47 @@ export async function POST(req: NextRequest) {
       if (detected) trade.asset_type = detected;
     }
 
-    // Yahoo fallback for anything EODHD didn't classify (missing API key, ticker
-    // not in EODHD's universe, etc.). Same "only upgrade to ETF" semantics as
-    // the refresh-route auto-heal — see mapYahooQuoteType in prices.ts for why
-    // we never trust Yahoo's "EQUITY" (REITs lump under it). This makes the
-    // first-insert asset type correct instead of waiting for the next refresh
-    // to run correctInstrumentAssetType. Best-effort; parser default stays if
-    // Yahoo also can't answer.
-    const needYahoo = result.trades.filter(
-      (t) => t.ticker && !etfTypes[t.ticker],
-    );
-    if (needYahoo.length > 0) {
+    // Yahoo dual heal: mirrors the refresh route's fetchTickerMeta →
+    // correctInstrumentCurrency / correctInstrumentAssetType pass, but at
+    // import time so the very first insert lands with the right asset type
+    // AND currency. Runs on every tickered trade because currency isn't in
+    // EODHD's response — a VWRA row from DBS Vickers can arrive as SGD and
+    // still needs healing to USD even when EODHD already classified it as ETF.
+    //
+    // Heal-safe rules (both match the refresh path):
+    //   - asset_type: only fill when EODHD didn't already answer, and only
+    //     when Yahoo returns "ETF" (see mapYahooQuoteType — Yahoo lumps REITs
+    //     under "EQUITY", so we never trust that direction).
+    //   - currency: only overwrite with a SUPPORTED currency that differs
+    //     from what the parser guessed. Yahoo returns "GBp" for pence-quoted
+    //     UK lines (a display unit, not a real currency) — that fails the
+    //     supported check and is deliberately ignored.
+    //
+    // When we heal currency we zero buy_fx_rate so the FX fill step below
+    // re-fetches — the old rate was for the wrong currency.
+    const tickered = result.trades.filter((t) => t.ticker);
+    if (tickered.length > 0) {
       const tickerCurrency: Record<string, string> = {};
-      for (const t of needYahoo) tickerCurrency[t.ticker] = t.currency;
+      for (const t of tickered) tickerCurrency[t.ticker] = t.currency;
       const meta = await fetchTickerMeta(
-        needYahoo.map((t) => t.ticker),
+        tickered.map((t) => t.ticker),
         tickerCurrency,
       );
-      for (const trade of needYahoo) {
-        const detected = meta[trade.ticker]?.assetType;
-        if (detected) trade.asset_type = detected;
+      const supported = SUPPORTED_CURRENCIES as readonly string[];
+      for (const trade of tickered) {
+        const m = meta[trade.ticker];
+        if (!m) continue;
+        if (!etfTypes[trade.ticker] && m.assetType) {
+          trade.asset_type = m.assetType;
+        }
+        if (
+          m.currency &&
+          m.currency !== trade.currency &&
+          supported.includes(m.currency)
+        ) {
+          trade.currency = m.currency;
+          trade.buy_fx_rate = 0;
+        }
       }
     }
 
