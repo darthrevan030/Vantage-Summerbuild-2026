@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { HoldingRow } from "@/types/holding";
-import type { UserSettings } from "@/types/settings";
+import type { UserSettings, CostBasisMethod } from "@/types/settings";
+import type { RealizedLot } from "@/types/realized";
+import type { LotMatch, OpenBuyLot } from "@/lib/realized";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   computeCurrentValueSGD,
@@ -760,13 +762,14 @@ export async function fetchUserSettings(userId: string): Promise<UserSettings> {
   const supabase = await makeServerClient();
   const { data } = await supabase
     .from("user_settings")
-    .select("display_name, base_currency, role")
+    .select("display_name, base_currency, role, cost_basis_method")
     .eq("user_id", userId)
     .single();
   return {
     displayName: data?.display_name ?? "",
     baseCurrency: data?.base_currency ?? "SGD",
     role: data?.role ?? "user",
+    costBasisMethod: (data?.cost_basis_method as CostBasisMethod) ?? "fifo",
   };
 }
 
@@ -862,8 +865,261 @@ export async function upsertUserSettings(
       ...(settings.baseCurrency !== undefined && {
         base_currency: settings.baseCurrency,
       }),
+      ...(settings.costBasisMethod !== undefined && {
+        cost_basis_method: settings.costBasisMethod,
+      }),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
   );
+}
+
+// ── Realized lots (T6) ────────────────────────────────────────────────────────
+
+interface DbRealizedLot {
+  id: string;
+  instrument_id: string;
+  sell_lot_id: string;
+  buy_lot_id: string;
+  method: CostBasisMethod;
+  matched_quantity: number;
+  matched_buy_price: number;
+  matched_buy_fx: number;
+  sell_price: number;
+  sell_fx: number;
+  asset_gain_sgd: number;
+  fx_gain_sgd: number;
+  realized_date: string;
+  instruments?: DbInstrument | null;
+}
+
+function toRealizedLot(row: DbRealizedLot, inst: DbInstrument): RealizedLot {
+  return {
+    id: row.id,
+    instrumentId: row.instrument_id,
+    ticker: inst.symbol,
+    name: inst.name,
+    assetType: inst.asset_type,
+    currency: inst.currency,
+    flag: inst.flag,
+    icon: inst.icon,
+    sellLotId: row.sell_lot_id,
+    buyLotId: row.buy_lot_id,
+    method: row.method,
+    matchedQuantity: Number(row.matched_quantity),
+    matchedBuyPrice: Number(row.matched_buy_price),
+    matchedBuyFx: Number(row.matched_buy_fx),
+    sellPrice: Number(row.sell_price),
+    sellFx: Number(row.sell_fx),
+    assetGainSgd: Number(row.asset_gain_sgd),
+    fxGainSgd: Number(row.fx_gain_sgd),
+    realizedDate: row.realized_date,
+  };
+}
+
+// Buy lots still open for an instrument, netted against every existing
+// realized_lots match. Fresh on every call — never cached, since sells must
+// always match against the true current remainder.
+export async function fetchOpenBuyLots(
+  userId: string,
+  instrumentId: string,
+): Promise<OpenBuyLot[]> {
+  const supabase = await makeServerClient();
+  const [{ data: buyLots }, { data: matches }] = await Promise.all([
+    supabase
+      .from("lots")
+      .select("id, quantity, price, fx_rate, fees, trade_date")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId)
+      .eq("transaction_type", "buy"),
+    supabase
+      .from("realized_lots")
+      .select("buy_lot_id, matched_quantity")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId),
+  ]);
+
+  const matchedByLot = new Map<string, number>();
+  for (const m of matches ?? []) {
+    const key = m.buy_lot_id as string;
+    matchedByLot.set(key, (matchedByLot.get(key) ?? 0) + Number(m.matched_quantity));
+  }
+
+  return (buyLots ?? [])
+    .map((l) => {
+      const quantity = Number(l.quantity);
+      const matched = matchedByLot.get(l.id as string) ?? 0;
+      return {
+        id: l.id as string,
+        tradeDate: l.trade_date as string,
+        price: Number(l.price),
+        fxRate: Number(l.fx_rate),
+        fees: Number(l.fees),
+        quantity,
+        openQuantity: quantity - matched,
+      };
+    })
+    .filter((l) => l.openQuantity > 1e-9);
+}
+
+export async function insertRealizedLots(
+  userId: string,
+  instrumentId: string,
+  sellLotId: string,
+  method: CostBasisMethod,
+  realizedDate: string,
+  sellPrice: number,
+  sellFx: number,
+  matches: LotMatch[],
+): Promise<void> {
+  if (matches.length === 0) return;
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("realized_lots").insert(
+    matches.map((m) => ({
+      user_id: userId,
+      instrument_id: instrumentId,
+      sell_lot_id: sellLotId,
+      buy_lot_id: m.buyLotId,
+      method,
+      matched_quantity: m.matchedQuantity,
+      matched_buy_price: m.matchedBuyPrice,
+      matched_buy_fx: m.matchedBuyFx,
+      sell_price: sellPrice,
+      sell_fx: sellFx,
+      asset_gain_sgd: m.assetGainSgd,
+      fx_gain_sgd: m.fxGainSgd,
+      realized_date: realizedDate,
+    })),
+  );
+  if (error) console.error("[insertRealizedLots]", error.message);
+}
+
+export async function fetchRealizedLots(userId: string): Promise<RealizedLot[]> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("realized_lots")
+    .select("*, instruments(*)")
+    .eq("user_id", userId)
+    .order("realized_date", { ascending: true });
+  if (error) {
+    console.error("[fetchRealizedLots]", error.message);
+    return [];
+  }
+  return (data as DbRealizedLot[])
+    .filter((r) => r.instruments)
+    .map((r) => toRealizedLot(r, r.instruments!));
+}
+
+export interface UnmatchedSellLot {
+  id: string;
+  instrumentId: string;
+  ticker: string;
+  quantity: number;
+  price: number;
+  fxRate: number;
+  fees: number;
+  tradeDate: string;
+}
+
+// Sell lots with zero realized_lots rows yet, oldest first — reconcileRealizedLots
+// (reconcile-realized.ts) processes these sequentially so each sell's matches are
+// committed before the next sell's open-quantity is computed.
+export async function fetchUnmatchedSellLots(
+  userId: string,
+): Promise<UnmatchedSellLot[]> {
+  const supabase = await makeServerClient();
+  const [{ data: sells }, { data: matched }] = await Promise.all([
+    supabase
+      .from("lots")
+      .select("id, instrument_id, quantity, price, fx_rate, fees, trade_date, instruments(symbol)")
+      .eq("user_id", userId)
+      .eq("transaction_type", "sell")
+      .order("trade_date", { ascending: true }),
+    supabase.from("realized_lots").select("sell_lot_id").eq("user_id", userId),
+  ]);
+  const matchedIds = new Set((matched ?? []).map((m) => m.sell_lot_id as string));
+  return (sells ?? [])
+    .filter((s) => !matchedIds.has(s.id as string))
+    .map((s) => ({
+      id: s.id as string,
+      instrumentId: s.instrument_id as string,
+      ticker: (s.instruments as unknown as { symbol: string } | null)?.symbol ?? "",
+      quantity: Number(s.quantity),
+      price: Number(s.price),
+      fxRate: Number(s.fx_rate),
+      fees: Number(s.fees),
+      tradeDate: s.trade_date as string,
+    }));
+}
+
+export async function fetchLotById(
+  id: string,
+  userId: string,
+): Promise<{
+  id: string;
+  instrumentId: string;
+  transactionType: "buy" | "sell";
+  quantity: number;
+  tradeDate: string;
+} | null> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("lots")
+    .select("id, instrument_id, transaction_type, quantity, trade_date")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id as string,
+    instrumentId: data.instrument_id as string,
+    transactionType: data.transaction_type as "buy" | "sell",
+    quantity: Number(data.quantity),
+    tradeDate: data.trade_date as string,
+  };
+}
+
+export async function fetchMatchedQuantityForBuyLot(
+  buyLotId: string,
+  userId: string,
+): Promise<number> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("realized_lots")
+    .select("matched_quantity")
+    .eq("buy_lot_id", buyLotId)
+    .eq("user_id", userId);
+  return (data ?? []).reduce((s, r) => s + Number(r.matched_quantity), 0);
+}
+
+export async function fetchMatchedQuantityForSellLot(
+  sellLotId: string,
+  userId: string,
+): Promise<number> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("realized_lots")
+    .select("matched_quantity")
+    .eq("sell_lot_id", sellLotId)
+    .eq("user_id", userId);
+  return (data ?? []).reduce((s, r) => s + Number(r.matched_quantity), 0);
+}
+
+// Resolves a ticker to its instrument id via the user's own lots — tickers are
+// the grouping key everywhere else in the app (bucketByPosition), so this
+// follows the same convention rather than requiring the client to know
+// instrument ids at all.
+export async function resolveInstrumentIdForTicker(
+  userId: string,
+  ticker: string,
+): Promise<string | null> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("lots")
+    .select("instrument_id, instruments!inner(symbol)")
+    .eq("user_id", userId)
+    .eq("instruments.symbol", ticker)
+    .limit(1)
+    .maybeSingle();
+  return (data?.instrument_id as string) ?? null;
 }
