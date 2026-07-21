@@ -8,6 +8,8 @@ import { SummaryRail } from "@/components/SummaryRail";
 import { TweaksPanel } from "@/components/TweaksPanel";
 import { PortfolioProvider } from "@/context/portfolio";
 import type { HoldingRow } from "@/types/holding";
+import type { ClosedPosition } from "@/types/realized";
+import type { CostBasisMethod } from "@/types/settings";
 import type {
   HeroStats,
   AllocationSlice,
@@ -21,6 +23,7 @@ import type {
 interface DashboardShellProps {
   holdings: HoldingRow[];
   hero: HeroStats;
+  closedPositions: ClosedPosition[];
   assetAllocation: AllocationSlice[];
   geoAllocation: AllocationSlice[];
   movers: { gainers: MoverItem[]; losers: MoverItem[] };
@@ -35,12 +38,14 @@ interface DashboardShellProps {
   initialDisplayName: string;
   initialBaseCurrency: string;
   initialRole: string;
+  initialCostBasisMethod: CostBasisMethod;
   children: React.ReactNode;
 }
 
 export function DashboardShell({
   holdings,
   hero,
+  closedPositions,
   assetAllocation,
   geoAllocation,
   movers,
@@ -55,6 +60,7 @@ export function DashboardShell({
   initialDisplayName,
   initialBaseCurrency,
   initialRole,
+  initialCostBasisMethod,
   children,
 }: DashboardShellProps) {
   const [tweaksOpen, setTweaksOpen] = useState(false);
@@ -67,6 +73,7 @@ export function DashboardShell({
       value={{
         holdings,
         hero,
+        closedPositions,
         assetAllocation,
         geoAllocation,
         movers,
@@ -81,6 +88,7 @@ export function DashboardShell({
         initialDisplayName,
         initialBaseCurrency,
         initialRole,
+        initialCostBasisMethod,
       }}
     >
       <div className="flex min-h-screen flex-col">

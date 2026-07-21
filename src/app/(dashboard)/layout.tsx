@@ -4,7 +4,9 @@ import {
   fetchHoldings,
   fetchUserSettings,
   fetchSnapshots,
+  fetchRealizedLots,
 } from "@/lib/supabase/data";
+import { reconcileRealizedLots } from "@/lib/reconcile-realized";
 import {
   computeHeroStats,
   computeAllocationByAsset,
@@ -12,6 +14,7 @@ import {
   computeMovers,
   computeCurrencyCards,
   computeWaterfall,
+  computeRealizedSummary,
   generatePortfolioSeries,
   generatePortfolioSeriesDaily,
   generateFxSeries,
@@ -35,11 +38,26 @@ export default async function DashboardLayout({
     user ? fetchHoldings(user.id) : Promise.resolve([]),
     user
       ? fetchUserSettings(user.id)
-      : Promise.resolve({ displayName: "", baseCurrency: "SGD", role: "user" }),
+      : Promise.resolve({
+          displayName: "",
+          baseCurrency: "SGD",
+          role: "user",
+          costBasisMethod: "fifo" as const,
+        }),
     user ? fetchSnapshots(user.id) : Promise.resolve([]),
   ]);
 
-  const hero = computeHeroStats(holdings, snapshots);
+  if (user) {
+    const { warnings } = await reconcileRealizedLots(
+      user.id,
+      userSettings.costBasisMethod,
+    );
+    for (const w of warnings) console.warn("[reconcileRealizedLots]", w);
+  }
+  const realizedLots = user ? await fetchRealizedLots(user.id) : [];
+
+  const hero = computeHeroStats(holdings, snapshots, realizedLots);
+  const closedPositions = computeRealizedSummary(holdings, realizedLots);
   const assetAllocation = computeAllocationByAsset(holdings);
   const geoAllocation = computeAllocationByGeo(holdings);
   const movers = computeMovers(holdings);
@@ -62,6 +80,7 @@ export default async function DashboardLayout({
     <DashboardShell
       holdings={holdings}
       hero={hero}
+      closedPositions={closedPositions}
       assetAllocation={assetAllocation}
       geoAllocation={geoAllocation}
       movers={movers}
@@ -76,6 +95,7 @@ export default async function DashboardLayout({
       initialDisplayName={userSettings.displayName}
       initialBaseCurrency={userSettings.baseCurrency}
       initialRole={userSettings.role}
+      initialCostBasisMethod={userSettings.costBasisMethod}
     >
       {children}
     </DashboardShell>
