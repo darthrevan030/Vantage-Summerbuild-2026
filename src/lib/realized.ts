@@ -60,19 +60,26 @@ export function matchSell(
       );
     }
     const byId = new Map(available.map((l) => [l.id, l]));
+    const cumulativeByLotId = new Map<string, number>();
     allocations = manualAllocations.map((a) => {
       const lot = byId.get(a.buyLotId);
       if (!lot) {
         throw new InvalidAllocationError(`buy lot ${a.buyLotId} is not open`);
       }
+      if (!Number.isFinite(a.quantity)) {
+        throw new InvalidAllocationError("allocation quantity must be finite");
+      }
       if (a.quantity <= 0) {
         throw new InvalidAllocationError("allocation quantity must be positive");
       }
-      if (a.quantity > lot.openQuantity + EPS) {
+      const priorForLot = cumulativeByLotId.get(a.buyLotId) ?? 0;
+      const cumulativeForLot = priorForLot + a.quantity;
+      if (cumulativeForLot > lot.openQuantity + EPS) {
         throw new InvalidAllocationError(
           `allocation exceeds open quantity for lot ${a.buyLotId}`,
         );
       }
+      cumulativeByLotId.set(a.buyLotId, cumulativeForLot);
       return { lot, qty: a.quantity };
     });
     const allocatedTotal = allocations.reduce((s, a) => s + a.qty, 0);

@@ -101,4 +101,26 @@ describe("matchSell — specific", () => {
   it("throws InvalidAllocationError when no allocations are supplied", () => {
     expect(() => matchSell(sell, [b1, b2], "specific")).toThrow(InvalidAllocationError);
   });
+
+  it("throws InvalidAllocationError when duplicate buyLotId entries cumulatively overdraw a lot", () => {
+    // b1 has openQuantity 10. Two allocations against b1 (8 + 7 = 15) each pass
+    // the per-entry check individually (8 <= 10, 7 <= 10), and the total (15)
+    // equals the sell quantity — but cumulatively they claim 15 units from a
+    // lot that only has 10 open, a 5-unit overdraft.
+    expect(() =>
+      matchSell({ ...sell, quantity: 15 }, [b1], "specific", [
+        { buyLotId: "b1", quantity: 8 },
+        { buyLotId: "b1", quantity: 7 },
+      ]),
+    ).toThrow(InvalidAllocationError);
+  });
+
+  it("throws InvalidAllocationError when an allocation quantity is NaN", () => {
+    expect(() =>
+      matchSell({ ...sell, quantity: 10 }, [b1, b2], "specific", [
+        { buyLotId: "b1", quantity: NaN },
+        { buyLotId: "b2", quantity: 10 },
+      ]),
+    ).toThrow(InvalidAllocationError);
+  });
 });
