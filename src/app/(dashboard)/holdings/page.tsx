@@ -911,7 +911,7 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
 }
 
 export default function HoldingsPage() {
-  const { holdings, fmtVal, fmtSigned } = usePortfolio();
+  const { holdings, fmtVal, fmtSigned, closedPositions } = usePortfolio();
   const router = useRouter();
 
   const [q, setQ] = useState("");
@@ -925,6 +925,7 @@ export default function HoldingsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
   const [groupView, setGroupView] = useState(true);
+  const [tab, setTab] = useState<"open" | "closed">("open");
   const [expandedTickers, setExpandedTickers] = useState<Set<string>>(
     new Set(),
   );
@@ -1163,6 +1164,33 @@ export default function HoldingsPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-[18px]">
+      <div className="flex gap-1.5 animate-reveal">
+        <button
+          className={
+            "cursor-pointer rounded-lg border px-[15px] py-[7px] font-ui text-[12.5px] transition-all duration-150 " +
+            (tab === "open"
+              ? "border-gold-soft bg-wash text-gold"
+              : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+          }
+          onClick={() => setTab("open")}
+        >
+          Open
+        </button>
+        <button
+          className={
+            "cursor-pointer rounded-lg border px-[15px] py-[7px] font-ui text-[12.5px] transition-all duration-150 " +
+            (tab === "closed"
+              ? "border-gold-soft bg-wash text-gold"
+              : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+          }
+          onClick={() => setTab("closed")}
+        >
+          Closed{closedPositions.length > 0 ? ` (${closedPositions.length})` : ""}
+        </button>
+      </div>
+
+      {tab === "open" && (
+        <>
       {/* filter bar */}
       <div className="flex flex-wrap items-center gap-3 max-bp768:gap-2 max-bp600:flex-col max-bp600:items-stretch animate-reveal">
         <div className="flex flex-1 items-center gap-[9px] rounded-[10px] border border-subtle bg-surface px-[13px] py-[9px] text-muted min-w-[220px] max-bp600:w-full max-bp600:min-w-0">
@@ -1900,6 +1928,98 @@ export default function HoldingsPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {tab === "closed" && (
+        <div className="card p-0 overflow-x-auto overflow-y-hidden max-bp768:overflow-y-visible animate-reveal">
+          <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
+            <thead>
+              <tr>
+                <Th>Name / Ticker</Th>
+                <Th>Type</Th>
+                <Th right>Units Sold</Th>
+                <Th right>Asset Gain</Th>
+                <Th right>FX Gain</Th>
+                <Th right>Realized Gain</Th>
+                <Th>Last Sale</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {closedPositions.map((p) => (
+                <tr key={p.ticker}>
+                  <td className="px-3.5 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Icon
+                        name={p.icon as never}
+                        size={15}
+                        style={{ color: "var(--gold)" }}
+                      />
+                      <div className="flex flex-col">
+                        <span className="font-ui text-[13px] text-primary">
+                          {p.name}
+                        </span>
+                        <span className="font-mono text-[11px] text-secondary">
+                          {p.ticker}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3.5 py-2.5 font-ui text-[12.5px] text-secondary">
+                    {p.assetType}
+                  </td>
+                  <td className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums">
+                    {NF(p.totalQuantitySold, 4)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums"
+                    style={{
+                      color: p.assetGainSgd >= 0 ? "var(--gain)" : "var(--loss)",
+                    }}
+                  >
+                    {fmtSigned(p.assetGainSgd)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums"
+                    style={{
+                      color:
+                        p.fxGainSgd >= 0
+                          ? "var(--fx-positive)"
+                          : "var(--fx-negative)",
+                    }}
+                  >
+                    {fmtSigned(p.fxGainSgd)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] font-semibold tabular-nums"
+                    style={{
+                      color: p.realizedGainSgd >= 0 ? "var(--gain)" : "var(--loss)",
+                    }}
+                  >
+                    {fmtSigned(p.realizedGainSgd)}
+                  </td>
+                  <td className="px-3.5 py-2.5 font-ui text-[12.5px] text-secondary">
+                    {p.lastSaleDate}
+                  </td>
+                </tr>
+              ))}
+              {closedPositions.length === 0 && (
+                <tr>
+                  <td
+                    className="text-[13px]"
+                    colSpan={7}
+                    style={{ textAlign: "center", padding: "32px 0" }}
+                  >
+                    <span className="font-ui text-secondary">
+                      No closed positions yet.
+                    </span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
