@@ -21,21 +21,27 @@ export default function SettingsPage() {
     baseFxRates,
     fxColors,
     role,
+    costBasisMethod,
     setDisplayName,
     setBaseCurrency,
+    setCostBasisMethod,
   } = usePortfolio();
   const currencies = useCurrencies();
   const router = useRouter();
 
   const [nameInput, setNameInput] = useState(displayName);
   const [ccyInput, setCcyInput] = useState(baseCurrency);
+  const [methodInput, setMethodInput] = useState(costBasisMethod);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const isLiveRate = (c: string) => c === "SGD" || c.toLowerCase() in fxColors;
 
-  const isDirty = nameInput !== displayName || ccyInput !== baseCurrency;
+  const isDirty =
+    nameInput !== displayName ||
+    ccyInput !== baseCurrency ||
+    methodInput !== costBasisMethod;
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -44,12 +50,17 @@ export default function SettingsPage() {
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ displayName: nameInput, baseCurrency: ccyInput }),
+      body: JSON.stringify({
+        displayName: nameInput,
+        baseCurrency: ccyInput,
+        costBasisMethod: methodInput,
+      }),
     });
 
     if (res.ok) {
       setDisplayName(nameInput);
       setBaseCurrency(ccyInput);
+      setCostBasisMethod(methodInput);
       setSaveState("saved");
       toast.success("Preferences saved");
       setTimeout(() => setSaveState("idle"), 2000);
@@ -195,6 +206,46 @@ export default function SettingsPage() {
           )}
         </div>
 
+        {/* Cost-Basis Method */}
+        <div className="card flex flex-col gap-4 px-5 py-4.5 max-bp480:p-3.5 max-bp380:p-3">
+          <div className="flex items-baseline justify-between mb-4">
+            <span className="text-[13px] font-semibold text-primary tracking-[.01em]">
+              Cost-Basis Method
+            </span>
+            <span className="font-ui text-secondary text-[11px]">
+              how realized gains are matched when you sell
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            {(
+              [
+                { v: "fifo", label: "FIFO", hint: "oldest lots first" },
+                { v: "average", label: "Average", hint: "blended cost" },
+                { v: "specific", label: "Specific-lot", hint: "choose per sale" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.v}
+                type="button"
+                className={
+                  "bg-elevated border rounded-[11px] px-4 py-3 cursor-pointer flex flex-col gap-[3px] [transition:border-color_.15s,background_.15s,box-shadow_.15s] text-left min-w-[110px] " +
+                  (methodInput === m.v
+                    ? "border-gold-soft bg-wash shadow-[inset_0_0_0_1px_var(--border-gold)]"
+                    : "border-subtle hover:border-muted")
+                }
+                onClick={() => setMethodInput(m.v)}
+              >
+                <span className="font-ui text-[13px] font-semibold text-primary">
+                  {m.label}
+                </span>
+                <span className="font-ui text-[10.5px] text-secondary">
+                  {m.hint}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Save */}
         <div className="flex items-center gap-3 flex-wrap">
           <button
@@ -225,6 +276,7 @@ export default function SettingsPage() {
               onClick={() => {
                 setNameInput(displayName);
                 setCcyInput(baseCurrency);
+                setMethodInput(costBasisMethod);
               }}
             >
               Discard changes
