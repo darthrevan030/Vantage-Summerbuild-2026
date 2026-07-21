@@ -285,6 +285,9 @@ export async function PATCH(req: NextRequest) {
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
+  const existingLot = await fetchLotById(id, user.id);
+  if (!existingLot) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const body = await req.json();
 
   // Lot-level fields (user's transaction leg) → mapped to lots columns
@@ -372,6 +375,44 @@ export async function PATCH(req: NextRequest) {
   if (lotPatch.quantity !== undefined && Number(lotPatch.quantity) <= 0)
     return NextResponse.json({ error: "invalid units" }, { status: 400 });
 
+  // A buy lot that's already been matched by a realized sale can't have its
+  // quantity reduced below the matched amount — realized_lots stores a frozen
+  // price/fx snapshot, not a live join, but the remaining OPEN quantity must
+  // still make physical sense.
+  if (existingLot.transactionType === "buy" && lotPatch.quantity !== undefined) {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0 && Number(lotPatch.quantity) < matched) {
+      return NextResponse.json(
+        {
+          error: `This lot has ${matched} unit(s) already matched to realized sales and can't be reduced below that.`,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  // A sell lot that's already been matched can't have its financial terms
+  // edited — the realized record is frozen at sell-commit time and editing
+  // the sale afterward would make it inconsistent with what was recorded.
+  // Delete and re-enter the sale instead (delete cascades realized_lots).
+  if (existingLot.transactionType === "sell") {
+    const affectsMatch = ["quantity", "price", "trade_date", "fx_rate", "fees"].some(
+      (k) => lotPatch[k] !== undefined,
+    );
+    if (affectsMatch) {
+      const matched = await fetchMatchedQuantityForSellLot(id, user.id);
+      if (matched > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "This sale has already been matched to realized P&L. Delete it and record a new sale instead of editing the amount, price, date, FX rate, or fees.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+  }
+
   // Dividend-yield override (per user + instrument). null clears it.
   const hasDividend = body.dividend_yield !== undefined;
   if (
@@ -435,6 +476,19 @@ export async function DELETE(req: NextRequest) {
 
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const existingLot = await fetchLotById(id, user.id);
+  if (existingLot?.transactionType === "buy") {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0) {
+      return NextResponse.json(
+        {
+          error: "This lot has units matched to realized sales and can't be deleted.",
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   await deleteLot(id, user.id);
   return NextResponse.json({ ok: true });
