@@ -72,31 +72,40 @@ interface CsvRow {
   [key: string]: string;
 }
 
+// Lowercased keys — headers are normalized (trim + toLowerCase) before lookup
+// so "Units", "units", " UNITS " all resolve to the same target.
 const CSV_FIELD_MAP: Record<string, string> = {
-  Name: "name",
-  "Asset Name": "name",
-  "Stock Name": "name",
-  Ticker: "ticker",
-  Symbol: "ticker",
-  "Asset Type": "asset_type",
-  Type: "asset_type",
-  Strategy: "strategy",
-  Broker: "broker",
-  Units: "units",
-  Qty: "units",
-  Quantity: "units",
-  Shares: "units",
-  Currency: "currency",
-  CCY: "currency",
-  "Purchase Price": "buy_price",
-  "Buy Price": "buy_price",
-  Price: "buy_price",
-  "Purchase Date": "buy_date",
-  "Date Bought": "buy_date",
-  Date: "buy_date",
-  "FX Rate": "buy_fx_rate",
-  "Purchase FX Rate": "buy_fx_rate",
+  "name": "name",
+  "asset name": "name",
+  "stock name": "name",
+  "ticker": "ticker",
+  "symbol": "ticker",
+  "asset type": "asset_type",
+  "type": "asset_type",
+  "strategy": "strategy",
+  "broker": "broker",
+  "units": "units",
+  "qty": "units",
+  "quantity": "units",
+  "shares": "units",
+  "no. of shares": "units",
+  "nominal": "units",
+  "currency": "currency",
+  "ccy": "currency",
+  "purchase price": "buy_price",
+  "buy price": "buy_price",
+  "price": "buy_price",
+  "avg price": "buy_price",
+  "cost basis": "buy_price",
+  "purchase date": "buy_date",
+  "date bought": "buy_date",
+  "date": "buy_date",
+  "trade date": "buy_date",
+  "fx rate": "buy_fx_rate",
+  "purchase fx rate": "buy_fx_rate",
 };
+
+const csvHeaderKey = (h: string) => h.trim().toLowerCase();
 
 function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
   const lines = text.trim().split("\n");
@@ -108,6 +117,15 @@ function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
     return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
   });
   return { headers, rows };
+}
+
+// parseFloat("1,000") stops at the comma and returns 1 — a silent data-loss
+// bug when broker CSVs use thousands separators. Strip anything that isn't
+// numeric before parsing.
+function parseCsvNumber(v: string | undefined): number {
+  if (v == null) return NaN;
+  const cleaned = String(v).replace(/[^\d.\-eE+]/g, "");
+  return cleaned === "" ? NaN : parseFloat(cleaned);
 }
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -558,7 +576,7 @@ function ImportPanel() {
       setRows(parsed.rows);
       const autoMap: Record<string, string> = {};
       for (const h of parsed.headers) {
-        const target = CSV_FIELD_MAP[h];
+        const target = CSV_FIELD_MAP[csvHeaderKey(h)];
         if (target) autoMap[h] = target;
       }
       setMapping(autoMap);
@@ -575,6 +593,21 @@ function ImportPanel() {
   };
 
   const handleImport = async () => {
+    // Require the mapping to include the fields we can't sensibly default.
+    // Otherwise units would silently fall back to 1 and the resulting rows
+    // look like a rendering bug on the holdings page (issue #25).
+    const mapped = new Set(Object.values(mapping));
+    const missing: string[] = [];
+    if (!mapped.has("name")) missing.push("Name");
+    if (!mapped.has("units")) missing.push("Units");
+    if (!mapped.has("buy_price")) missing.push("Buy Price");
+    if (missing.length > 0) {
+      const msg = `Map required columns before importing: ${missing.join(", ")}.`;
+      setResult(msg);
+      toast.error(msg);
+      return;
+    }
+
     setImporting(true);
     setResult("");
     let ok = 0, fail = 0;
@@ -582,13 +615,22 @@ function ImportPanel() {
       const name = row[Object.entries(mapping).find(([, v]) => v === "name")?.[0] ?? ""] ?? "";
       const ticker = row[Object.entries(mapping).find(([, v]) => v === "ticker")?.[0] ?? ""] ?? "—";
       const asset_type = row[Object.entries(mapping).find(([, v]) => v === "asset_type")?.[0] ?? ""] || "Equity";
-      const buy_price = parseFloat(row[Object.entries(mapping).find(([, v]) => v === "buy_price")?.[0] ?? ""] ?? "0");
+      const buy_price = parseCsvNumber(row[Object.entries(mapping).find(([, v]) => v === "buy_price")?.[0] ?? ""]);
       const buy_date = row[Object.entries(mapping).find(([, v]) => v === "buy_date")?.[0] ?? ""] || new Date().toISOString().slice(0, 10);
-      const units = parseFloat(row[Object.entries(mapping).find(([, v]) => v === "units")?.[0] ?? ""] ?? "0");
+      const units = parseCsvNumber(row[Object.entries(mapping).find(([, v]) => v === "units")?.[0] ?? ""]);
       const currency = row[Object.entries(mapping).find(([, v]) => v === "currency")?.[0] ?? ""] || "SGD";
       // Check if the CSV already has an FX rate column mapped
       const csvFxRate = row[Object.entries(mapping).find(([, v]) => v === "buy_fx_rate")?.[0] ?? ""];
-      if (!name || !buy_price) { fail++; continue; }
+      // Fail loudly instead of coercing missing/invalid units to 1 — the old
+      // `units || 1` fallback masked broken imports (issue #25).
+      if (
+        !name ||
+        !Number.isFinite(buy_price) || buy_price <= 0 ||
+        !Number.isFinite(units) || units <= 0
+      ) {
+        fail++;
+        continue;
+      }
       try {
         // Fetch real historical FX rate unless the CSV already provides one
         let buy_fx_rate = 1;
@@ -621,7 +663,7 @@ function ImportPanel() {
             asset_type,
             broker: "Imported",
             strategy: "long_term",
-            units: units || 1,
+            units,
             currency,
             flag: CCY_FLAGS[currency] ?? "🌐",
             icon: TYPE_ICON[asset_type] ?? "briefcase",
