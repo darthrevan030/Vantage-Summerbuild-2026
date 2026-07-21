@@ -111,7 +111,7 @@ export function LiveTerminal() {
       <div className="pointer-events-none absolute" />
       <motion.div
         style={{ rotateX: srx, rotateY: sry, transformStyle: "preserve-3d" }}
-        className="overflow-hidden rounded-2xl border border-subtle bg-surface/80 shadow-[0_40px_90px_-45px_rgba(0,0,0,0.85)] backdrop-blur-xl"
+        className="@container overflow-hidden rounded-2xl border border-subtle bg-surface/80 shadow-[0_40px_90px_-45px_rgba(0,0,0,0.85)] backdrop-blur-xl"
       >
         {/* title bar */}
         <div className="relative flex items-center border-b border-subtle px-4 py-3">
@@ -163,9 +163,13 @@ export function LiveTerminal() {
           </div>
         </div>
 
-        {/* chart + holdings */}
-        <div className="grid gap-0 md:grid-cols-[1.4fr_1fr]">
-          <div className="border-b border-subtle p-6 md:border-b-0 md:border-r">
+        {/* chart + holdings — container queries so the split only triggers
+            when the terminal itself is wide enough (viewport-based md: was
+            triggering the 2-col layout even when the terminal sat in the
+            480px desktop hero column, causing the holdings row to overflow
+            past overflow-hidden and clip the ticker/value cells). */}
+        <div className="grid gap-0 @3xl:grid-cols-[1.4fr_1fr]">
+          <div className="border-b border-subtle p-6 @3xl:border-b-0 @3xl:border-r">
             <div className="mb-4 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted">
                 Portfolio value · 1Y
