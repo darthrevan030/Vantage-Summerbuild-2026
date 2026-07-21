@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { HoldingRow } from "@/types/holding";
 import type { UserSettings, CostBasisMethod } from "@/types/settings";
+import type { CashTransaction, CashTransactionType } from "@/types/cash";
 import type { RealizedLot } from "@/types/realized";
 import type { LotMatch, OpenBuyLot } from "@/lib/realized";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -688,34 +689,6 @@ export async function updateFxRate(
   if (error) console.error("[updateFxRate]", error.message);
 }
 
-// ── Cash balances ─────────────────────────────────────────────────────────────
-
-export async function fetchCashBalances(
-  userId: string,
-): Promise<{ currency: string; amount: number }[]> {
-  const supabase = await makeServerClient();
-  const { data } = await supabase
-    .from("cash_balances")
-    .select("currency, amount")
-    .eq("user_id", userId)
-    .order("currency");
-  return (data ?? []).map((r) => ({
-    currency: r.currency as string,
-    amount: Number(r.amount),
-  }));
-}
-
-export async function upsertCashBalance(
-  userId: string,
-  currency: string,
-  amount: number,
-): Promise<void> {
-  const supabase = await makeServerClient();
-  await supabase
-    .from("cash_balances")
-    .upsert({ user_id: userId, currency, amount }, { onConflict: "user_id,currency" });
-}
-
 // ── CPF balances ──────────────────────────────────────────────────────────────
 
 export async function fetchCpfBalances(userId: string): Promise<{
@@ -762,7 +735,7 @@ export async function fetchUserSettings(userId: string): Promise<UserSettings> {
   const supabase = await makeServerClient();
   const { data } = await supabase
     .from("user_settings")
-    .select("display_name, base_currency, role, cost_basis_method")
+    .select("display_name, base_currency, role, cost_basis_method, track_cash")
     .eq("user_id", userId)
     .single();
   return {
@@ -770,6 +743,7 @@ export async function fetchUserSettings(userId: string): Promise<UserSettings> {
     baseCurrency: data?.base_currency ?? "SGD",
     role: data?.role ?? "user",
     costBasisMethod: (data?.cost_basis_method as CostBasisMethod) ?? "fifo",
+    trackCash: data?.track_cash ?? true,
   };
 }
 
@@ -867,6 +841,9 @@ export async function upsertUserSettings(
       }),
       ...(settings.costBasisMethod !== undefined && {
         cost_basis_method: settings.costBasisMethod,
+      }),
+      ...(settings.trackCash !== undefined && {
+        track_cash: settings.trackCash,
       }),
       updated_at: new Date().toISOString(),
     },
@@ -1126,4 +1103,247 @@ export async function resolveInstrumentIdForTicker(
     .limit(1)
     .maybeSingle();
   return (data?.instrument_id as string) ?? null;
+}
+
+// ── Cash transactions (T7) ─────────────────────────────────────────────────────
+
+interface DbCashTransaction {
+  id: string;
+  lot_id: string | null;
+  transfer_group_id: string | null;
+  date: string;
+  type: CashTransactionType;
+  currency: string;
+  amount: number;
+  fx_rate: number;
+  broker: string;
+  source: string;
+  note: string | null;
+}
+
+function toCashTransaction(row: DbCashTransaction): CashTransaction {
+  return {
+    id: row.id,
+    lotId: row.lot_id,
+    transferGroupId: row.transfer_group_id,
+    date: row.date,
+    type: row.type,
+    currency: row.currency,
+    amount: Number(row.amount),
+    fxRate: Number(row.fx_rate),
+    broker: row.broker,
+    source: row.source,
+    note: row.note,
+  };
+}
+
+const CASH_TX_COLUMNS =
+  "id, lot_id, transfer_group_id, date, type, currency, amount, fx_rate, broker, source, note";
+
+export async function fetchCashTransactions(userId: string): Promise<CashTransaction[]> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .select(CASH_TX_COLUMNS)
+    .eq("user_id", userId)
+    .order("date", { ascending: false });
+  if (error) {
+    console.error("[fetchCashTransactions]", error.message);
+    return [];
+  }
+  return (data as DbCashTransaction[]).map(toCashTransaction);
+}
+
+export async function fetchCashBalancesLive(
+  userId: string,
+): Promise<{ currency: string; amount: number }[]> {
+  const transactions = await fetchCashTransactions(userId);
+  const byCurrency = new Map<string, number>();
+  for (const t of transactions) {
+    byCurrency.set(t.currency, (byCurrency.get(t.currency) ?? 0) + t.amount);
+  }
+  return Array.from(byCurrency.entries())
+    .map(([currency, amount]) => ({ currency, amount }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+export interface ManualCashInput {
+  date: string;
+  type: CashTransactionType;
+  currency: string;
+  amount: number;
+  fxRate: number;
+  broker: string;
+  source: string;
+  note: string | null;
+}
+
+export async function insertCashTransaction(
+  userId: string,
+  input: ManualCashInput,
+): Promise<CashTransaction | null> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .insert({
+      user_id: userId,
+      date: input.date,
+      type: input.type,
+      currency: input.currency,
+      amount: input.amount,
+      fx_rate: input.fxRate,
+      broker: input.broker,
+      source: input.source,
+      note: input.note,
+    })
+    .select(CASH_TX_COLUMNS)
+    .single();
+  if (error) {
+    console.error("[insertCashTransaction]", error.message);
+    return null;
+  }
+  return toCashTransaction(data as DbCashTransaction);
+}
+
+export interface TransferInput {
+  date: string;
+  currency: string;
+  amount: number;
+  fxRate: number;
+  fromBroker: string;
+  toBroker: string;
+  note: string | null;
+}
+
+export async function insertTransferPair(
+  userId: string,
+  input: TransferInput,
+): Promise<[CashTransaction, CashTransaction] | null> {
+  const supabase = await makeServerClient();
+  const groupId = crypto.randomUUID();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .insert([
+      {
+        user_id: userId,
+        date: input.date,
+        type: "transfer",
+        currency: input.currency,
+        amount: -input.amount,
+        fx_rate: input.fxRate,
+        broker: input.fromBroker,
+        source: "",
+        note: input.note,
+        transfer_group_id: groupId,
+      },
+      {
+        user_id: userId,
+        date: input.date,
+        type: "transfer",
+        currency: input.currency,
+        amount: input.amount,
+        fx_rate: input.fxRate,
+        broker: input.toBroker,
+        source: "",
+        note: input.note,
+        transfer_group_id: groupId,
+      },
+    ])
+    .select(CASH_TX_COLUMNS);
+  if (error || !data || data.length !== 2) {
+    console.error("[insertTransferPair]", error?.message);
+    return null;
+  }
+  return [
+    toCashTransaction(data[0] as DbCashTransaction),
+    toCashTransaction(data[1] as DbCashTransaction),
+  ];
+}
+
+export async function deleteCashTransaction(
+  id: string,
+  userId: string,
+): Promise<"ok" | "not_found" | "auto_derived"> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("cash_transactions")
+    .select("id, lot_id, transfer_group_id")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return "not_found";
+  if (data.lot_id) return "auto_derived";
+  if (data.transfer_group_id) {
+    await supabase
+      .from("cash_transactions")
+      .delete()
+      .eq("transfer_group_id", data.transfer_group_id)
+      .eq("user_id", userId);
+  } else {
+    await supabase.from("cash_transactions").delete().eq("id", id).eq("user_id", userId);
+  }
+  return "ok";
+}
+
+export interface AutoCashInput {
+  date: string;
+  type: "buy" | "sell";
+  currency: string;
+  amount: number;
+  fxRate: number;
+  broker: string;
+  source: string;
+}
+
+export async function insertAutoCashTransaction(
+  userId: string,
+  lotId: string,
+  input: AutoCashInput,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("cash_transactions").insert({
+    user_id: userId,
+    lot_id: lotId,
+    date: input.date,
+    type: input.type,
+    currency: input.currency,
+    amount: input.amount,
+    fx_rate: input.fxRate,
+    broker: input.broker,
+    source: input.source,
+    note: null,
+  });
+  if (error) console.error("[insertAutoCashTransaction]", error.message);
+}
+
+export async function deleteCashTransactionsByLotId(
+  lotId: string,
+  userId: string,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  await supabase
+    .from("cash_transactions")
+    .delete()
+    .eq("lot_id", lotId)
+    .eq("user_id", userId);
+}
+
+export async function insertLegacyCashSeed(
+  userId: string,
+  amountSgd: number,
+  date: string,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("cash_transactions").insert({
+    user_id: userId,
+    date,
+    type: "deposit",
+    currency: "SGD",
+    amount: amountSgd,
+    fx_rate: 1,
+    broker: "",
+    source: "",
+    note: "legacy seed from cost basis",
+  });
+  if (error) console.error("[insertLegacyCashSeed]", error.message);
 }
