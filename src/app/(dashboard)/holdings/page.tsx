@@ -20,6 +20,14 @@ import { refreshHoldingPrices } from "@/lib/api-client";
 import type { HoldingRow, GroupedHolding, AssetType } from "@/types/holding";
 import { FIXED_INCOME_TYPES } from "@/types/holding";
 import { groupHoldings } from "@/lib/group-holdings";
+import type { OpenBuyLot } from "@/lib/realized";
+import type { CostBasisMethod } from "@/types/settings";
+
+const METHOD_LABEL: Record<CostBasisMethod, string> = {
+  fifo: "FIFO",
+  average: "Average",
+  specific: "Specific-lot",
+};
 
 // Day-over-day price move in native currency (currency cancels in the ratio).
 // Returns null when there's no previous close to compare against.
@@ -140,7 +148,7 @@ const LOT_CELL_R = LOT_CELL + " text-right font-mono";
 const LOT_CELL_R_BOLD = LOT_CELL_R + " font-semibold";
 
 function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
-  const { fmtVal, fmtSigned } = usePortfolio();
+  const { fmtVal, fmtSigned, costBasisMethod } = usePortfolio();
   const router = useRouter();
   const d = h.detail;
   const total = h.assetGain + h.fxGain;
@@ -180,6 +188,37 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
     setSellForm((f) => ({ ...f, [k]: v }));
   const canSell = h.ticker !== "—";
 
+  const [methodOverride, setMethodOverride] = useState<CostBasisMethod | null>(
+    null,
+  );
+  const effectiveMethod = methodOverride ?? costBasisMethod;
+  const [openLots, setOpenLots] = useState<OpenBuyLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(false);
+  const [lotAllocations, setLotAllocations] = useState<Record<string, string>>(
+    {},
+  );
+  const allocatedTotal = Object.values(lotAllocations).reduce(
+    (s, v) => s + (Number(v) || 0),
+    0,
+  );
+
+  useEffect(() => {
+    if (mode !== "sell" || effectiveMethod !== "specific" || !canSell) return;
+    let alive = true;
+    setLoadingLots(true);
+    fetch(`/api/holdings/open-lots?ticker=${encodeURIComponent(h.ticker)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: OpenBuyLot[]) => {
+        if (alive) setOpenLots(rows);
+      })
+      .finally(() => {
+        if (alive) setLoadingLots(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, effectiveMethod, canSell, h.ticker]);
+
   async function handleSell() {
     setSaving(true);
     try {
@@ -187,6 +226,18 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
       const price = Number(sf.price);
       if (!(units > 0)) throw new Error("Units to sell must be positive");
       if (!(price > 0)) throw new Error("Sale price must be positive");
+
+      let lot_allocations: { buyLotId: string; qty: number }[] | undefined;
+      if (effectiveMethod === "specific") {
+        lot_allocations = Object.entries(lotAllocations)
+          .map(([buyLotId, v]) => ({ buyLotId, qty: Number(v) || 0 }))
+          .filter((a) => a.qty > 0);
+        const allocated = lot_allocations.reduce((s, a) => s + a.qty, 0);
+        if (Math.abs(allocated - units) > 1e-6) {
+          throw new Error("Chosen lot quantities must add up to the units sold");
+        }
+      }
+
       const res = await fetch("/api/holdings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,6 +259,8 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           spark_data: h.sparkData,
           transaction_type: "sell",
           source: h.source,
+          cost_basis_method: effectiveMethod,
+          ...(lot_allocations ? { lot_allocations } : {}),
         }),
       });
       if (!res.ok) {
@@ -587,6 +640,63 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
             </div>
           )}
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+            Cost-basis method
+          </span>
+          <Select
+            value={METHOD_LABEL[effectiveMethod]}
+            options={Object.values(METHOD_LABEL)}
+            onChange={(v) => {
+              const next = (Object.entries(METHOD_LABEL).find(
+                ([, l]) => l === v,
+              )?.[0] ?? "fifo") as CostBasisMethod;
+              setMethodOverride(next);
+            }}
+          />
+        </div>
+        {effectiveMethod === "specific" && (
+          <div className="flex flex-col gap-1.5 rounded-[8px] border border-subtle bg-surface p-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+              Choose lots to close
+            </span>
+            {loadingLots ? (
+              <span className="font-ui text-[11.5px] text-secondary">
+                Loading open lots…
+              </span>
+            ) : openLots.length === 0 ? (
+              <span className="font-ui text-[11.5px] text-secondary">
+                No open lots found.
+              </span>
+            ) : (
+              openLots.map((lot) => (
+                <div key={lot.id} className="flex items-center justify-between gap-2">
+                  <span className="font-ui text-[11.5px] text-secondary">
+                    {lot.tradeDate} · {NF(lot.openQuantity, 4)} open @ {NF(lot.price, 4)}
+                  </span>
+                  <input
+                    className="w-20 rounded-[6px] border border-subtle bg-elevated px-2 py-1 font-mono text-[11.5px] text-primary outline-none focus:border-gold-soft"
+                    type="number"
+                    min="0"
+                    max={lot.openQuantity}
+                    step="any"
+                    placeholder="0"
+                    value={lotAllocations[lot.id] ?? ""}
+                    onChange={(e) =>
+                      setLotAllocations((prev) => ({
+                        ...prev,
+                        [lot.id]: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              ))
+            )}
+            <span className="font-ui text-[11px] text-muted">
+              Allocated: {NF(allocatedTotal, 4)} / {sf.units || "0"}
+            </span>
+          </div>
+        )}
         <button
           className="w-full cursor-pointer rounded-[9px] border-none bg-loss p-[9px] font-ui text-[13px] font-semibold text-white transition-[filter] duration-150 hover:brightness-[1.08] disabled:cursor-not-allowed disabled:opacity-50"
           onClick={handleSell}
