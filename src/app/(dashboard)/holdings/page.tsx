@@ -581,8 +581,8 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           </button>
         </div>
         <div className="rounded-[8px] border border-subtle bg-surface px-3 py-2 font-ui text-[11.5px] text-secondary">
-          Records a sell transaction that reduces your net position. Cost basis
-          stays at your average buy price.
+          Records a sell transaction that reduces your net position. Realized
+          gain is matched using your chosen cost-basis method below.
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
