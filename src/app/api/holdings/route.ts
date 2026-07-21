@@ -189,6 +189,12 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+      if (lot_allocations.some((a) => typeof a !== "object" || a === null)) {
+        return NextResponse.json(
+          { error: "invalid lot_allocations entry" },
+          { status: 400 },
+        );
+      }
       manualAllocations = lot_allocations.map(
         (a: { buyLotId: string; qty: number }) => ({
           buyLotId: String(a.buyLotId),
