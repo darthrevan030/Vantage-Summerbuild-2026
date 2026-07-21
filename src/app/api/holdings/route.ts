@@ -4,6 +4,7 @@ import {
   upsertInstrument,
   insertLot,
   deleteLot,
+  deleteAllLotsForUser,
   updateLot,
   updateInstrumentForLot,
   upsertHoldingOverride,
@@ -339,6 +340,13 @@ export async function DELETE(req: NextRequest) {
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
+  // Bulk wipe: DELETE /api/holdings?all=1. Kept as a query param on the same
+  // route so the auth guard is shared — a separate route would duplicate it.
+  if (searchParams.get("all") === "1") {
+    const deleted = await deleteAllLotsForUser(user.id);
+    return NextResponse.json({ ok: true, deleted });
+  }
+
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 

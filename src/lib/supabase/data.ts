@@ -523,6 +523,25 @@ export async function deleteLot(id: string, userId: string): Promise<void> {
   await supabase.from("lots").delete().eq("id", id).eq("user_id", userId);
 }
 
+// Wipe every lot for the user. Used by the holdings-page "delete all" action.
+// Instruments and holding_overrides are left alone — instruments are shared
+// across users, and overrides are cheap to leave orphaned (they key off
+// (user_id, instrument_id) so they'll simply never resurface once the lots
+// are gone). Returns the number of rows removed for the confirmation toast.
+export async function deleteAllLotsForUser(userId: string): Promise<number> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("lots")
+    .delete()
+    .eq("user_id", userId)
+    .select("id");
+  if (error) {
+    console.error("[deleteAllLotsForUser]", error.message);
+    return 0;
+  }
+  return Array.isArray(data) ? data.length : 0;
+}
+
 // Per-user manual dividend-yield override for an instrument. Passing null clears
 // it (falls back to the auto TTM yield from ticker_dividends).
 export async function upsertHoldingOverride(
