@@ -10,10 +10,18 @@ import {
   upsertHoldingOverride,
   upsertHoldingOverrideForLot,
   seedTickerQuote,
+  fetchUserSettings,
+  fetchOpenBuyLots,
+  insertRealizedLots,
+  fetchLotById,
+  fetchMatchedQuantityForBuyLot,
+  fetchMatchedQuantityForSellLot,
 } from "@/lib/supabase/data";
 import { requireAuth } from "@/lib/supabase/guards";
 import { CCY_FLAG, SUPPORTED_CURRENCIES } from "@/lib/formatters";
 import { ASSET_TYPES } from "@/types/holding";
+import { matchSell, type ManualAllocation } from "@/lib/realized";
+import type { CostBasisMethod } from "@/types/settings";
 
 const TICKER_RE = /^[A-Za-z0-9.\-:]{1,20}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -156,6 +164,65 @@ export async function POST(req: NextRequest) {
   if (!instrumentId)
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
+  // 3. If this is a sell, resolve the cost-basis method and match it against
+  //    open buy lots BEFORE writing anything — an invalid/oversold match
+  //    should reject the whole request, not leave an unmatched sell lot behind.
+  let sellMatches: ReturnType<typeof matchSell> | undefined;
+  let sellMethod: CostBasisMethod | undefined;
+  if (transaction_type === "sell") {
+    const { lot_allocations, cost_basis_method } = body;
+    if (
+      cost_basis_method !== undefined &&
+      !["fifo", "average", "specific"].includes(String(cost_basis_method))
+    ) {
+      return NextResponse.json({ error: "invalid cost_basis_method" }, { status: 400 });
+    }
+    sellMethod =
+      (cost_basis_method as CostBasisMethod | undefined) ??
+      (await fetchUserSettings(user.id)).costBasisMethod;
+
+    let manualAllocations: ManualAllocation[] | undefined;
+    if (sellMethod === "specific") {
+      if (!Array.isArray(lot_allocations) || lot_allocations.length === 0) {
+        return NextResponse.json(
+          { error: "specific cost-basis method requires lot_allocations" },
+          { status: 400 },
+        );
+      }
+      manualAllocations = lot_allocations.map(
+        (a: { buyLotId: string; qty: number }) => ({
+          buyLotId: String(a.buyLotId),
+          quantity: Number(a.qty),
+        }),
+      );
+    }
+
+    const openBuyLots = await fetchOpenBuyLots(user.id, instrumentId);
+    try {
+      sellMatches = matchSell(
+        {
+          quantity: Number(units),
+          price: Number(buy_price),
+          fxRate: Number(buy_fx_rate ?? 1),
+          fees: fees != null ? Number(fees) : 0,
+        },
+        openBuyLots,
+        sellMethod,
+        manualAllocations,
+      );
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error:
+            e instanceof Error
+              ? e.message
+              : "Could not match sell against open lots",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   // 2. Seed a quote so the holding shows a price before the first refresh
   //    (no-op if a shared quote already exists for this symbol)
   await seedTickerQuote(
@@ -180,6 +247,19 @@ export async function POST(req: NextRequest) {
 
   if (!row) {
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+  }
+
+  if (transaction_type === "sell" && sellMatches && sellMethod) {
+    await insertRealizedLots(
+      user.id,
+      instrumentId,
+      row.id,
+      sellMethod,
+      String(buy_date),
+      Number(buy_price),
+      Number(buy_fx_rate ?? 1),
+      sellMatches,
+    );
   }
 
   // Persist a manual dividend-yield override if one was supplied
