@@ -77,6 +77,9 @@ export interface PortfolioAnalytics {
   worstDayDate: string;
   days: number;
   series: { date: string; value: number; cost: number }[];
+  xirr: number;
+  xirrByBroker: { broker: string; xirr: number }[];
+  xirrBySource: { source: string; xirr: number }[];
 }
 
 export interface CashBalance {

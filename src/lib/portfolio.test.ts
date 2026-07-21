@@ -21,6 +21,7 @@ import type { HoldingRow } from "@/types/holding";
 import type { SnapshotRow } from "@/lib/supabase/data";
 import type { CurrencyCard } from "@/types/portfolio";
 import type { RealizedLot } from "@/types/realized";
+import type { CashTransaction } from "@/types/cash";
 
 function makeRow(overrides: Partial<HoldingRow> = {}): HoldingRow {
   return {
@@ -95,6 +96,23 @@ function makeCard(overrides: Partial<CurrencyCard> = {}): CurrencyCard {
     impact: 50,
     dir: "pos",
     spark: [],
+    ...overrides,
+  };
+}
+
+function makeCashTx(overrides: Partial<CashTransaction> = {}): CashTransaction {
+  return {
+    id: "t1",
+    lotId: null,
+    transferGroupId: null,
+    date: "2026-01-01",
+    type: "deposit",
+    currency: "SGD",
+    amount: 1000,
+    fxRate: 1,
+    broker: "",
+    source: "",
+    note: null,
     ...overrides,
   };
 }
@@ -483,6 +501,70 @@ describe("computePortfolioAnalytics", () => {
     expect(result.actualSharpe).toBe(0);
     expect(result.annualisedVol).toBe(0);
     expect(result.cagr).toBeCloseTo(100.09497421168562, 6);
+  });
+
+  it("backs a deposit out of the return so it isn't misread as a gain", () => {
+    // snapshots are HOLDINGS-ONLY value (matching recordSnapshot's real
+    // convention) — computeTotalValueSeries overlays cash ON TOP of these.
+    // Holdings grow organically 1000 -> 1100 (+10%, no new investment); a
+    // separate 500 deposit lands in cash on day 2, uninvested. The combined
+    // series therefore jumps 1000 -> 1600 (naive +60%), but the deposit is a
+    // flow, not a gain — the adjusted return must come out to +10%, matching
+    // the real organic growth, not the naive 60%.
+    const snapshots = [
+      makeSnapshot({ recordedDate: "2026-01-01", valueSgd: 1000 }),
+      makeSnapshot({ recordedDate: "2026-01-02", valueSgd: 1100 }),
+    ];
+    const cashTransactions = [
+      makeCashTx({ date: "2026-01-02", type: "deposit", amount: 500, fxRate: 1 }),
+    ];
+    const result = computePortfolioAnalytics(snapshots, cashTransactions);
+    expect(result.bestDayReturn).toBeCloseTo(10, 6);
+  });
+
+  it("computes portfolio-wide XIRR from deposit/withdrawal flows plus ending value", () => {
+    // No pre-existing holdings (valueSgd: 0 on both snapshots) — ALL value in
+    // this series comes from the single recorded deposit, so the expected
+    // XIRR is unambiguous: put in 1000, still worth 1000 a year later -> 0%.
+    // (If these snapshots instead used the makeSnapshot default of valueSgd:
+    // 1000, the pre-existing 1000 of holdings would itself be an un-recorded
+    // implicit contribution, and the correct XIRR would be 100%, not 0% — the
+    // point of this test is the flow/ending-value arithmetic in isolation.)
+    const snapshots = [
+      makeSnapshot({ recordedDate: "2026-01-01", valueSgd: 0 }),
+      makeSnapshot({ recordedDate: "2027-01-01", valueSgd: 0 }),
+    ];
+    const cashTransactions = [
+      makeCashTx({ date: "2026-01-01", type: "deposit", amount: 1000, fxRate: 1 }),
+    ];
+    const result = computePortfolioAnalytics(snapshots, cashTransactions);
+    // total value series (holdings 0 + cash 1000) is 1000 on both dates;
+    // flows = [-1000 @ day1, +1000 @ day2] -> XIRR = 0%.
+    expect(result.xirr).toBeCloseTo(0, 3);
+  });
+
+  it("returns empty xirrByBroker/xirrBySource when no holdings are supplied", () => {
+    const snapshots = [
+      makeSnapshot({ recordedDate: "2026-01-01", valueSgd: 1000 }),
+      makeSnapshot({ recordedDate: "2026-01-02", valueSgd: 1100 }),
+    ];
+    const result = computePortfolioAnalytics(snapshots);
+    expect(result.xirrByBroker).toEqual([]);
+    expect(result.xirrBySource).toEqual([]);
+  });
+
+  it("computes a per-broker XIRR bucket when holdings/cash are tagged with a broker", () => {
+    const snapshots = [
+      makeSnapshot({ recordedDate: "2026-01-01", valueSgd: 1000 }),
+      makeSnapshot({ recordedDate: "2027-01-01", valueSgd: 1000 }),
+    ];
+    const holdings = [makeRow({ id: "h1", broker: "IBKR", valueSGD: 500, costSGD: 500 })];
+    const cashTransactions = [
+      makeCashTx({ date: "2026-01-01", type: "deposit", amount: 500, fxRate: 1, broker: "IBKR" }),
+    ];
+    const result = computePortfolioAnalytics(snapshots, cashTransactions, holdings);
+    expect(result.xirrByBroker).toHaveLength(1);
+    expect(result.xirrByBroker[0].broker).toBe("IBKR");
   });
 });
 
