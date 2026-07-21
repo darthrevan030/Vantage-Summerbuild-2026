@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useState, useCallback } from "react";
 import type { HoldingRow } from "@/types/holding";
+import type { ClosedPosition } from "@/types/realized";
+import type { CostBasisMethod } from "@/types/settings";
 import type {
   HeroStats,
   AllocationSlice,
@@ -16,6 +18,7 @@ import { ccyFmt, ccySigned } from "@/lib/formatters";
 interface PortfolioContextValue {
   holdings: HoldingRow[];
   hero: HeroStats;
+  closedPositions: ClosedPosition[];
   assetAllocation: AllocationSlice[];
   geoAllocation: AllocationSlice[];
   movers: { gainers: MoverItem[]; losers: MoverItem[] };
@@ -31,8 +34,10 @@ interface PortfolioContextValue {
   displayName: string;
   baseCurrency: string;
   role: string;
+  costBasisMethod: CostBasisMethod;
   setDisplayName: (v: string) => void;
   setBaseCurrency: (v: string) => void;
+  setCostBasisMethod: (v: CostBasisMethod) => void;
   // derived converters
   toBase: (sgdVal: number) => number;
   fmtVal: (sgdVal: number) => string;
@@ -45,8 +50,10 @@ interface ProviderProps {
     | "displayName"
     | "baseCurrency"
     | "role"
+    | "costBasisMethod"
     | "setDisplayName"
     | "setBaseCurrency"
+    | "setCostBasisMethod"
     | "toBase"
     | "fmtVal"
     | "fmtSigned"
@@ -54,6 +61,7 @@ interface ProviderProps {
     initialDisplayName: string;
     initialBaseCurrency: string;
     initialRole: string;
+    initialCostBasisMethod: CostBasisMethod;
   };
   children: React.ReactNode;
 }
@@ -63,6 +71,9 @@ const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 export function PortfolioProvider({ value, children }: ProviderProps) {
   const [displayName, setDisplayName] = useState(value.initialDisplayName);
   const [baseCurrency, setBaseCurrency] = useState(value.initialBaseCurrency);
+  const [costBasisMethod, setCostBasisMethod] = useState(
+    value.initialCostBasisMethod,
+  );
   const role = value.initialRole;
 
   const toBase = useCallback(
@@ -88,8 +99,10 @@ export function PortfolioProvider({ value, children }: ProviderProps) {
     displayName,
     baseCurrency,
     role,
+    costBasisMethod,
     setDisplayName,
     setBaseCurrency,
+    setCostBasisMethod,
     toBase,
     fmtVal,
     fmtSigned,

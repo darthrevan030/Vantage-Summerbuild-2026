@@ -10,10 +10,18 @@ import {
   upsertHoldingOverride,
   upsertHoldingOverrideForLot,
   seedTickerQuote,
+  fetchUserSettings,
+  fetchOpenBuyLots,
+  insertRealizedLots,
+  fetchLotById,
+  fetchMatchedQuantityForBuyLot,
+  fetchMatchedQuantityForSellLot,
 } from "@/lib/supabase/data";
 import { requireAuth } from "@/lib/supabase/guards";
 import { CCY_FLAG, SUPPORTED_CURRENCIES } from "@/lib/formatters";
 import { ASSET_TYPES } from "@/types/holding";
+import { matchSell, type ManualAllocation } from "@/lib/realized";
+import type { CostBasisMethod } from "@/types/settings";
 
 const TICKER_RE = /^[A-Za-z0-9.\-:]{1,20}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -156,6 +164,71 @@ export async function POST(req: NextRequest) {
   if (!instrumentId)
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
 
+  // 3. If this is a sell, resolve the cost-basis method and match it against
+  //    open buy lots BEFORE writing anything — an invalid/oversold match
+  //    should reject the whole request, not leave an unmatched sell lot behind.
+  let sellMatches: ReturnType<typeof matchSell> | undefined;
+  let sellMethod: CostBasisMethod | undefined;
+  if (transaction_type === "sell") {
+    const { lot_allocations, cost_basis_method } = body;
+    if (
+      cost_basis_method !== undefined &&
+      !["fifo", "average", "specific"].includes(String(cost_basis_method))
+    ) {
+      return NextResponse.json({ error: "invalid cost_basis_method" }, { status: 400 });
+    }
+    sellMethod =
+      (cost_basis_method as CostBasisMethod | undefined) ??
+      (await fetchUserSettings(user.id)).costBasisMethod;
+
+    let manualAllocations: ManualAllocation[] | undefined;
+    if (sellMethod === "specific") {
+      if (!Array.isArray(lot_allocations) || lot_allocations.length === 0) {
+        return NextResponse.json(
+          { error: "specific cost-basis method requires lot_allocations" },
+          { status: 400 },
+        );
+      }
+      if (lot_allocations.some((a) => typeof a !== "object" || a === null)) {
+        return NextResponse.json(
+          { error: "invalid lot_allocations entry" },
+          { status: 400 },
+        );
+      }
+      manualAllocations = lot_allocations.map(
+        (a: { buyLotId: string; qty: number }) => ({
+          buyLotId: String(a.buyLotId),
+          quantity: Number(a.qty),
+        }),
+      );
+    }
+
+    const openBuyLots = await fetchOpenBuyLots(user.id, instrumentId);
+    try {
+      sellMatches = matchSell(
+        {
+          quantity: Number(units),
+          price: Number(buy_price),
+          fxRate: Number(buy_fx_rate ?? 1),
+          fees: fees != null ? Number(fees) : 0,
+        },
+        openBuyLots,
+        sellMethod,
+        manualAllocations,
+      );
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error:
+            e instanceof Error
+              ? e.message
+              : "Could not match sell against open lots",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   // 2. Seed a quote so the holding shows a price before the first refresh
   //    (no-op if a shared quote already exists for this symbol)
   await seedTickerQuote(
@@ -182,6 +255,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
   }
 
+  if (transaction_type === "sell" && sellMatches && sellMethod) {
+    await insertRealizedLots(
+      user.id,
+      instrumentId,
+      row.id,
+      sellMethod,
+      String(buy_date),
+      Number(buy_price),
+      Number(buy_fx_rate ?? 1),
+      sellMatches,
+    );
+  }
+
   // Persist a manual dividend-yield override if one was supplied
   if (dividend_yield !== undefined && dividend_yield !== null) {
     await upsertHoldingOverride(user.id, instrumentId, Number(dividend_yield));
@@ -198,6 +284,9 @@ export async function PATCH(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const existingLot = await fetchLotById(id, user.id);
+  if (!existingLot) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
 
@@ -286,6 +375,44 @@ export async function PATCH(req: NextRequest) {
   if (lotPatch.quantity !== undefined && Number(lotPatch.quantity) <= 0)
     return NextResponse.json({ error: "invalid units" }, { status: 400 });
 
+  // A buy lot that's already been matched by a realized sale can't have its
+  // quantity reduced below the matched amount — realized_lots stores a frozen
+  // price/fx snapshot, not a live join, but the remaining OPEN quantity must
+  // still make physical sense.
+  if (existingLot.transactionType === "buy" && lotPatch.quantity !== undefined) {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0 && Number(lotPatch.quantity) < matched) {
+      return NextResponse.json(
+        {
+          error: `This lot has ${matched} unit(s) already matched to realized sales and can't be reduced below that.`,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  // A sell lot that's already been matched can't have its financial terms
+  // edited — the realized record is frozen at sell-commit time and editing
+  // the sale afterward would make it inconsistent with what was recorded.
+  // Delete and re-enter the sale instead (delete cascades realized_lots).
+  if (existingLot.transactionType === "sell") {
+    const affectsMatch = ["quantity", "price", "trade_date", "fx_rate", "fees"].some(
+      (k) => lotPatch[k] !== undefined,
+    );
+    if (affectsMatch) {
+      const matched = await fetchMatchedQuantityForSellLot(id, user.id);
+      if (matched > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "This sale has already been matched to realized P&L. Delete it and record a new sale instead of editing the amount, price, date, FX rate, or fees.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+  }
+
   // Dividend-yield override (per user + instrument). null clears it.
   const hasDividend = body.dividend_yield !== undefined;
   if (
@@ -349,6 +476,19 @@ export async function DELETE(req: NextRequest) {
 
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const existingLot = await fetchLotById(id, user.id);
+  if (existingLot?.transactionType === "buy") {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0) {
+      return NextResponse.json(
+        {
+          error: "This lot has units matched to realized sales and can't be deleted.",
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   await deleteLot(id, user.id);
   return NextResponse.json({ ok: true });

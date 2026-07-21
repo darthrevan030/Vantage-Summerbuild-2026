@@ -2,8 +2,10 @@ export interface HeroStats {
   total: number;
   dayChange: number;
   dayPct: number;
-  totalGain: number;
-  totalGainPct: number;
+  unrealizedGain: number;
+  unrealizedGainPct: number;
+  realizedGain: number;
+  realizedGainPct: number;
   fxImpact: number;
   fxPct: number;
   neutral: number;

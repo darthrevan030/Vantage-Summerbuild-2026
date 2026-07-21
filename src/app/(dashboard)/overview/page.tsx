@@ -189,7 +189,7 @@ export default function OverviewPage() {
   const { gainers, losers } = computeMovers(holdings);
   const ccyCards = computeCurrencyCards(holdings);
   const bySource = computeAllocationBySource(holdings);
-  const assetGain = hero.totalGain - hero.fxImpact;
+  const assetGain = hero.unrealizedGain - hero.fxImpact;
   const acTop = assetAllocation.reduce((max, s) => s.value > max.value ? s : max, assetAllocation[0]);
   const geoTop = geoAllocation.reduce((max, s) => s.value > max.value ? s : max, geoAllocation[0]);
   const totalValue = hero.total;
@@ -253,7 +253,7 @@ export default function OverviewPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-[18px]">
-      <div className="grid grid-cols-3 gap-3.5 animate-reveal max-bp1080:grid-cols-2 max-bp480:grid-cols-2">
+      <div className="grid grid-cols-4 gap-3.5 animate-reveal max-bp1080:grid-cols-2 max-bp480:grid-cols-2">
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-l-2 border-subtle border-l-gold bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-[var(--card-shadow),-14px_0_36px_-28px_var(--accent-glow)] transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9),-16px_0_40px_-26px_var(--accent-glow)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">
             Total Value
@@ -271,16 +271,16 @@ export default function OverviewPage() {
         </div>
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
           <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">
-            Total Gain
+            Unrealized Gain
           </span>
           <span
             className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]"
             style={{
-              color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+              color: hero.unrealizedGain >= 0 ? "var(--gain)" : "var(--loss)",
             }}
           >
             <CountUp
-              to={toBase(hero.totalGain)}
+              to={toBase(hero.unrealizedGain)}
               format={(v) => ccySigned(v, baseCurrency)}
               startOnView={false}
             />
@@ -288,10 +288,35 @@ export default function OverviewPage() {
           <span
             className="font-mono text-xs tabular-nums"
             style={{
-              color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+              color: hero.unrealizedGain >= 0 ? "var(--gain)" : "var(--loss)",
             }}
           >
-            {pct(hero.totalGainPct)}
+            {pct(hero.unrealizedGainPct)}
+          </span>
+        </div>
+        <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.09em] text-muted">
+            Realized Gain
+          </span>
+          <span
+            className="font-mono text-[23px] font-semibold tracking-[-.01em] tabular-nums max-bp600:text-[19px] max-bp480:text-[17px] max-bp380:text-[15px]"
+            style={{
+              color: hero.realizedGain >= 0 ? "var(--gain)" : "var(--loss)",
+            }}
+          >
+            <CountUp
+              to={toBase(hero.realizedGain)}
+              format={(v) => ccySigned(v, baseCurrency)}
+              startOnView={false}
+            />
+          </span>
+          <span
+            className="font-mono text-xs tabular-nums"
+            style={{
+              color: hero.realizedGain >= 0 ? "var(--gain)" : "var(--loss)",
+            }}
+          >
+            {pct(hero.realizedGainPct)}
           </span>
         </div>
         <div className="relative flex flex-col gap-[5px] rounded-[14px] border border-subtle bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_42%),var(--bg-surface)] px-[18px] py-4 shadow-card transition-[transform,border-color,box-shadow] duration-[260ms] ease-[cubic-bezier(.2,.7,.2,1)] hover:-translate-y-[3px] hover:border-[rgba(186,170,255,0.18)] hover:shadow-[0_22px_44px_-26px_rgba(0,0,0,0.9)] max-bp600:px-3.5 max-bp600:py-[13px] max-bp480:px-3 max-bp480:py-[11px]">
@@ -604,11 +629,11 @@ export default function OverviewPage() {
                 <div
                   className="mt-0.5 font-mono text-base font-semibold tabular-nums max-bp480:text-[14px]"
                   style={{
-                    color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+                    color: hero.unrealizedGain >= 0 ? "var(--gain)" : "var(--loss)",
                   }}
                 >
-                  {fmtSigned(hero.totalGain)}{" "}
-                  <span>{pct(hero.totalGainPct)}</span>
+                  {fmtSigned(hero.unrealizedGain)}{" "}
+                  <span>{pct(hero.unrealizedGainPct)}</span>
                 </div>
               </div>
             </div>

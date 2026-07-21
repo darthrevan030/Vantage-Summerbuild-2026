@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/supabase/guards";
 import { fetchUserSettings, upsertUserSettings } from "@/lib/supabase/data";
 
 const CCY_RE = /^[A-Z]{3}$/;
+const COST_BASIS_METHODS = ["fifo", "average", "specific"];
 
 export async function GET() {
   const { user, error } = await requireAuth();
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
     typeof body.baseCurrency === "string"
       ? body.baseCurrency.toUpperCase()
       : undefined;
+  const costBasisMethod =
+    typeof body.costBasisMethod === "string" ? body.costBasisMethod : undefined;
 
   if (displayName !== undefined && displayName.length > 80) {
     return NextResponse.json(
@@ -36,8 +39,21 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (
+    costBasisMethod !== undefined &&
+    !COST_BASIS_METHODS.includes(costBasisMethod)
+  ) {
+    return NextResponse.json(
+      { error: "invalid costBasisMethod" },
+      { status: 400 },
+    );
+  }
 
-  await upsertUserSettings(user.id, { displayName, baseCurrency });
+  await upsertUserSettings(user.id, {
+    displayName,
+    baseCurrency,
+    costBasisMethod: costBasisMethod as "fifo" | "average" | "specific" | undefined,
+  });
 
   return NextResponse.json({ ok: true });
 }

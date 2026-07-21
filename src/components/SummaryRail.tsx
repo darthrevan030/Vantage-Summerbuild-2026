@@ -16,7 +16,7 @@ export function SummaryRail() {
     : null;
   const fxUp = hero.fxImpact >= 0;
   const dayUp = hero.dayChange >= 0;
-  const invested = hero.total - hero.totalGain;
+  const invested = hero.total - hero.unrealizedGain;
 
   const [activeSlice, setActiveSlice] = useState<number | null>(null);
   const activeData = activeSlice !== null ? assetAllocation[activeSlice] : null;
@@ -89,18 +89,18 @@ export function SummaryRail() {
           <span
             className="font-mono text-[17px] font-semibold max-bp480:text-[15px]"
             style={{
-              color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+              color: hero.unrealizedGain >= 0 ? "var(--gain)" : "var(--loss)",
             }}
           >
-            {fmtSigned(hero.totalGain)}
+            {fmtSigned(hero.unrealizedGain)}
           </span>
           <span
             className="font-mono text-xs"
             style={{
-              color: hero.totalGain >= 0 ? "var(--gain)" : "var(--loss)",
+              color: hero.unrealizedGain >= 0 ? "var(--gain)" : "var(--loss)",
             }}
           >
-            {pct(hero.totalGainPct)}
+            {pct(hero.unrealizedGainPct)}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
