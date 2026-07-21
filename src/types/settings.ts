@@ -5,4 +5,5 @@ export interface UserSettings {
   baseCurrency: string;
   role: string;
   costBasisMethod: CostBasisMethod;
+  trackCash: boolean;
 }

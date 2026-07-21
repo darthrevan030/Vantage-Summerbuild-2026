@@ -35,9 +35,11 @@ interface PortfolioContextValue {
   baseCurrency: string;
   role: string;
   costBasisMethod: CostBasisMethod;
+  trackCash: boolean;
   setDisplayName: (v: string) => void;
   setBaseCurrency: (v: string) => void;
   setCostBasisMethod: (v: CostBasisMethod) => void;
+  setTrackCash: (v: boolean) => void;
   // derived converters
   toBase: (sgdVal: number) => number;
   fmtVal: (sgdVal: number) => string;
@@ -51,9 +53,11 @@ interface ProviderProps {
     | "baseCurrency"
     | "role"
     | "costBasisMethod"
+    | "trackCash"
     | "setDisplayName"
     | "setBaseCurrency"
     | "setCostBasisMethod"
+    | "setTrackCash"
     | "toBase"
     | "fmtVal"
     | "fmtSigned"
@@ -62,6 +66,7 @@ interface ProviderProps {
     initialBaseCurrency: string;
     initialRole: string;
     initialCostBasisMethod: CostBasisMethod;
+    initialTrackCash: boolean;
   };
   children: React.ReactNode;
 }
@@ -74,6 +79,7 @@ export function PortfolioProvider({ value, children }: ProviderProps) {
   const [costBasisMethod, setCostBasisMethod] = useState(
     value.initialCostBasisMethod,
   );
+  const [trackCash, setTrackCash] = useState(value.initialTrackCash);
   const role = value.initialRole;
 
   const toBase = useCallback(
@@ -100,9 +106,11 @@ export function PortfolioProvider({ value, children }: ProviderProps) {
     baseCurrency,
     role,
     costBasisMethod,
+    trackCash,
     setDisplayName,
     setBaseCurrency,
     setCostBasisMethod,
+    setTrackCash,
     toBase,
     fmtVal,
     fmtSigned,

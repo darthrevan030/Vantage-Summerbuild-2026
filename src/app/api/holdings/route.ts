@@ -16,6 +16,8 @@ import {
   fetchLotById,
   fetchMatchedQuantityForBuyLot,
   fetchMatchedQuantityForSellLot,
+  insertAutoCashTransaction,
+  deleteCashTransactionsByLotId,
 } from "@/lib/supabase/data";
 import { requireAuth } from "@/lib/supabase/guards";
 import { CCY_FLAG, SUPPORTED_CURRENCIES } from "@/lib/formatters";
@@ -43,6 +45,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const { user, error } = await requireAuth();
   if (error) return error;
+
+  const userSettings = await fetchUserSettings(user.id);
 
   const body = await req.json();
   const {
@@ -179,7 +183,7 @@ export async function POST(req: NextRequest) {
     }
     sellMethod =
       (cost_basis_method as CostBasisMethod | undefined) ??
-      (await fetchUserSettings(user.id)).costBasisMethod;
+      userSettings.costBasisMethod;
 
     let manualAllocations: ManualAllocation[] | undefined;
     if (sellMethod === "specific") {
@@ -268,6 +272,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (userSettings.trackCash) {
+    const grossAmount = Number(units) * Number(buy_price);
+    const feeAmount = fees != null ? Number(fees) : 0;
+    const cashAmount =
+      transaction_type === "sell"
+        ? grossAmount - feeAmount
+        : -(grossAmount + feeAmount);
+    await insertAutoCashTransaction(user.id, row.id, {
+      date: String(buy_date),
+      type: transaction_type === "sell" ? "sell" : "buy",
+      currency: String(currency),
+      amount: cashAmount,
+      fxRate: Number(buy_fx_rate ?? 1),
+      broker: String(broker ?? ""),
+      source: source != null ? String(source) : "",
+    });
+  }
+
   // Persist a manual dividend-yield override if one was supplied
   if (dividend_yield !== undefined && dividend_yield !== null) {
     await upsertHoldingOverride(user.id, instrumentId, Number(dividend_yield));
@@ -288,6 +310,8 @@ export async function PATCH(req: NextRequest) {
   const existingLot = await fetchLotById(id, user.id);
   if (!existingLot) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  const userSettings = await fetchUserSettings(user.id);
+
   const body = await req.json();
 
   // Lot-level fields (user's transaction leg) → mapped to lots columns
@@ -307,6 +331,10 @@ export async function PATCH(req: NextRequest) {
   for (const [bodyKey, col] of Object.entries(LOT_MAP)) {
     if (body[bodyKey] !== undefined) lotPatch[col] = body[bodyKey];
   }
+
+  const touchesFinancialFields = ["quantity", "price", "trade_date", "fx_rate", "fees"].some(
+    (k) => lotPatch[k] !== undefined,
+  );
 
   // Instrument-level fields (shared security metadata) → updated via admin client
   const instPatch: Record<string, unknown> = {};
@@ -396,10 +424,7 @@ export async function PATCH(req: NextRequest) {
   // the sale afterward would make it inconsistent with what was recorded.
   // Delete and re-enter the sale instead (delete cascades realized_lots).
   if (existingLot.transactionType === "sell") {
-    const affectsMatch = ["quantity", "price", "trade_date", "fx_rate", "fees"].some(
-      (k) => lotPatch[k] !== undefined,
-    );
-    if (affectsMatch) {
+    if (touchesFinancialFields) {
       const matched = await fetchMatchedQuantityForSellLot(id, user.id);
       if (matched > 0) {
         return NextResponse.json(
@@ -459,6 +484,25 @@ export async function PATCH(req: NextRequest) {
   const row = await updateLot(id, user.id, lotPatch);
   if (!row)
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
+
+  if (userSettings.trackCash && touchesFinancialFields) {
+    await deleteCashTransactionsByLotId(id, user.id);
+    const grossAmount = row.units * row.buyPrice;
+    const cashAmount =
+      row.transactionType === "sell"
+        ? grossAmount - row.fees
+        : -(grossAmount + row.fees);
+    await insertAutoCashTransaction(user.id, id, {
+      date: row.buyDate,
+      type: row.transactionType,
+      currency: row.currency,
+      amount: cashAmount,
+      fxRate: row.buyFxRate,
+      broker: row.broker,
+      source: row.source,
+    });
+  }
+
   return NextResponse.json(row);
 }
 

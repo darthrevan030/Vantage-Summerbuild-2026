@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
       : undefined;
   const costBasisMethod =
     typeof body.costBasisMethod === "string" ? body.costBasisMethod : undefined;
+  const trackCash =
+    typeof body.trackCash === "boolean" ? body.trackCash : undefined;
 
   if (displayName !== undefined && displayName.length > 80) {
     return NextResponse.json(
@@ -53,6 +55,7 @@ export async function POST(req: NextRequest) {
     displayName,
     baseCurrency,
     costBasisMethod: costBasisMethod as "fifo" | "average" | "specific" | undefined,
+    trackCash,
   });
 
   return NextResponse.json({ ok: true });

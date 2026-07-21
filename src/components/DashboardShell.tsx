@@ -39,6 +39,7 @@ interface DashboardShellProps {
   initialBaseCurrency: string;
   initialRole: string;
   initialCostBasisMethod: CostBasisMethod;
+  initialTrackCash: boolean;
   children: React.ReactNode;
 }
 
@@ -61,6 +62,7 @@ export function DashboardShell({
   initialBaseCurrency,
   initialRole,
   initialCostBasisMethod,
+  initialTrackCash,
   children,
 }: DashboardShellProps) {
   const [tweaksOpen, setTweaksOpen] = useState(false);
@@ -89,6 +91,7 @@ export function DashboardShell({
         initialBaseCurrency,
         initialRole,
         initialCostBasisMethod,
+        initialTrackCash,
       }}
     >
       <div className="flex min-h-screen flex-col">

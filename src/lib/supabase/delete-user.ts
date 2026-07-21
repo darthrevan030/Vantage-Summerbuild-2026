@@ -11,7 +11,7 @@ const USER_SCOPED_TABLES = [
   "lots",
   "holding_overrides",
   "portfolio_snapshots",
-  "cash_balances",
+  "cash_transactions",
   "cpf_balances",
   "rate_limits",
   "user_settings",

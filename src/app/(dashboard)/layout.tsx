@@ -7,6 +7,7 @@ import {
   fetchRealizedLots,
 } from "@/lib/supabase/data";
 import { reconcileRealizedLots } from "@/lib/reconcile-realized";
+import { reconcileCashLedger } from "@/lib/reconcile-cash";
 import {
   computeHeroStats,
   computeAllocationByAsset,
@@ -43,6 +44,7 @@ export default async function DashboardLayout({
           baseCurrency: "SGD",
           role: "user",
           costBasisMethod: "fifo" as const,
+          trackCash: true,
         }),
     user ? fetchSnapshots(user.id) : Promise.resolve([]),
   ]);
@@ -53,6 +55,9 @@ export default async function DashboardLayout({
       userSettings.costBasisMethod,
     );
     for (const w of warnings) console.warn("[reconcileRealizedLots]", w);
+  }
+  if (user) {
+    await reconcileCashLedger(user.id, userSettings.trackCash, holdings);
   }
   const realizedLots = user ? await fetchRealizedLots(user.id) : [];
 
@@ -96,6 +101,7 @@ export default async function DashboardLayout({
       initialBaseCurrency={userSettings.baseCurrency}
       initialRole={userSettings.role}
       initialCostBasisMethod={userSettings.costBasisMethod}
+      initialTrackCash={userSettings.trackCash}
     >
       {children}
     </DashboardShell>

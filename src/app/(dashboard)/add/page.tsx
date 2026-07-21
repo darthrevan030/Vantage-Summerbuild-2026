@@ -244,74 +244,209 @@ function CpfForm() {
   );
 }
 
+const CASH_TYPE_LABEL: Record<string, string> = {
+  deposit: "Deposit",
+  withdrawal: "Withdrawal",
+  transfer: "Transfer",
+  fee: "Fee",
+  dividend_cash: "Dividend cash",
+};
+
 function CashForm() {
   const router = useRouter();
   const currencies = useCurrencies();
-  const [existing, setExisting] = useState<{ currency: string; amount: number }[]>([]);
+  const [transactions, setTransactions] = useState<
+    { id: string; lotId: string | null; date: string; type: string; currency: string; amount: number; broker: string; note: string | null }[]
+  >([]);
+  const [type, setType] = useState("deposit");
   const [currency, setCurrency] = useState("SGD");
   const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(TODAY);
+  const [broker, setBroker] = useState("");
+  const [toBroker, setToBroker] = useState("");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const load = () =>
-    fetch("/api/cash").then((r) => (r.ok ? r.json() : [])).then((rows) => setExisting(Array.isArray(rows) ? rows : [])).catch(() => {});
-  useEffect(() => { load(); }, []);
-
-  const pickCurrency = (c: string) => {
-    setCurrency(c);
-    const ex = existing.find((r) => r.currency === c);
-    setAmount(ex ? String(ex.amount) : "");
-  };
+    fetch("/api/cash/transactions")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setTransactions(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleSubmit = async () => {
     setError("");
     const amt = parseFloat(amount);
-    if (isNaN(amt) || amt < 0) { const msg = "Amount must be zero or positive."; setError(msg); toast.error(msg); return; }
+    if (isNaN(amt) || amt <= 0) {
+      const msg = "Amount must be positive.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    if (type === "transfer" && !toBroker.trim()) {
+      const msg = "Destination broker is required for a transfer.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/cash", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currency, amount: amt }),
+        body: JSON.stringify({
+          type,
+          currency,
+          amount: amt,
+          date,
+          broker,
+          to_broker: type === "transfer" ? toBroker : undefined,
+          note: note || null,
+        }),
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error ?? "Save failed"); }
-      toast.success(`${currency} cash balance saved`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Save failed");
+      }
+      toast.success(`${CASH_TYPE_LABEL[type]} logged`);
       setAmount("");
+      setNote("");
+      setToBroker("");
       await load();
       router.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Save failed";
-      setError(msg); toast.error(msg);
-    } finally { setSaving(false); }
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/cash?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Delete failed");
+      }
+      toast.success("Entry removed");
+      await load();
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    }
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
-      <Field label="Currency">
-        <Select value={CCY_FLAGS[currency] + " " + currency}
-          options={currencies.map((c) => (CCY_FLAGS[c] ?? "🌐") + " " + c)}
-          onChange={(v) => pickCurrency(v.split(" ")[1])} />
-      </Field>
-      <Field label="Amount">
-        <input className="inp" type="number" min="0" step="any" placeholder="10000"
-          value={amount} onChange={(e) => setAmount(e.target.value)} />
-      </Field>
-      {existing.length > 0 && (
-        <div className="col-span-full flex flex-wrap gap-2">
-          {existing.map((c) => (
-            <span key={c.currency} className="flex items-center gap-1.5 rounded-[9px] border border-subtle bg-elevated px-2.5 py-1.5 font-mono text-[12px] text-secondary">
-              {c.currency} {c.amount.toLocaleString()}
-            </span>
+    <div className="flex flex-col gap-3.5">
+      <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
+        <Field label="Type">
+          <Select
+            value={CASH_TYPE_LABEL[type]}
+            options={Object.values(CASH_TYPE_LABEL)}
+            onChange={(v) => {
+              const next = Object.entries(CASH_TYPE_LABEL).find(([, l]) => l === v)?.[0];
+              if (next) setType(next);
+            }}
+          />
+        </Field>
+        <Field label="Currency">
+          <Select
+            value={(CCY_FLAGS[currency] ?? "🌐") + " " + currency}
+            options={currencies.map((c) => (CCY_FLAGS[c] ?? "🌐") + " " + c)}
+            onChange={(v) => setCurrency(v.split(" ")[1])}
+          />
+        </Field>
+        <Field label="Amount">
+          <input
+            className="inp"
+            type="number"
+            min="0"
+            step="any"
+            placeholder="1000"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </Field>
+        <Field label="Date">
+          <input
+            className="inp"
+            type="date"
+            max={TODAY}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </Field>
+        <Field label={type === "transfer" ? "From broker" : "Broker"}>
+          <input
+            className="inp"
+            placeholder="e.g. IBKR"
+            value={broker}
+            onChange={(e) => setBroker(e.target.value)}
+          />
+        </Field>
+        {type === "transfer" && (
+          <Field label="To broker">
+            <input
+              className="inp"
+              placeholder="e.g. Tiger"
+              value={toBroker}
+              onChange={(e) => setToBroker(e.target.value)}
+            />
+          </Field>
+        )}
+        <Field label="Note (optional)" full>
+          <input
+            className="inp"
+            placeholder="optional"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
+      </div>
+      {error && (
+        <div className="font-ui" style={{ color: "var(--loss)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+      <button
+        className="flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+        onClick={handleSubmit}
+        disabled={saving}
+      >
+        <Icon name="plus" size={16} />
+        {saving ? "Saving…" : `Log ${CASH_TYPE_LABEL[type]}`}
+      </button>
+      {transactions.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {transactions.slice(0, 8).map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-2 rounded-[9px] border border-subtle bg-elevated px-2.5 py-1.5"
+            >
+              <span className="font-ui text-[11.5px] text-secondary">
+                {t.date} · {CASH_TYPE_LABEL[t.type] ?? t.type} · {t.currency}{" "}
+                {t.amount.toLocaleString()}
+                {t.broker ? ` · ${t.broker}` : ""}
+              </span>
+              {t.lotId ? (
+                <span className="font-ui text-[10.5px] text-muted">auto</span>
+              ) : (
+                <button
+                  className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-loss"
+                  onClick={() => handleDelete(t.id)}
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
-      {error && <div className="font-ui" style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}>{error}</div>}
-      <button
-        className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
-        onClick={handleSubmit} disabled={saving}>
-        <Icon name="plus" size={16} />
-        {saving ? "Saving…" : "Save Cash Balance"}
-      </button>
     </div>
   );
 }
@@ -324,7 +459,7 @@ const ENTRY_TYPES: [string, string][] = [
 const ENTRY_SUBTITLE: Record<string, string> = {
   holding: "add a position",
   cpf: "update CPF balances",
-  cash: "update cash balances",
+  cash: "log a cash transaction",
 };
 
 function ManualForm() {
