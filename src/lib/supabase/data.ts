@@ -1028,7 +1028,7 @@ export async function fetchUnmatchedSellLots(
   userId: string,
 ): Promise<UnmatchedSellLot[]> {
   const supabase = await makeServerClient();
-  const [{ data: sells }, { data: matched }] = await Promise.all([
+  const [{ data: sells }, { data: matched, error: matchedError }] = await Promise.all([
     supabase
       .from("lots")
       .select("id, instrument_id, quantity, price, fx_rate, fees, trade_date, instruments(symbol)")
@@ -1037,6 +1037,10 @@ export async function fetchUnmatchedSellLots(
       .order("trade_date", { ascending: true }),
     supabase.from("realized_lots").select("sell_lot_id").eq("user_id", userId),
   ]);
+  if (matchedError) {
+    console.error("[fetchUnmatchedSellLots]", matchedError.message);
+    return [];
+  }
   const matchedIds = new Set((matched ?? []).map((m) => m.sell_lot_id as string));
   return (sells ?? [])
     .filter((s) => !matchedIds.has(s.id as string))

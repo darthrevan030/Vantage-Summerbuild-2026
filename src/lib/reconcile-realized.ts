@@ -19,6 +19,13 @@ export async function reconcileRealizedLots(
   userId: string,
   method: CostBasisMethod,
 ): Promise<{ reconciled: number; warnings: string[] }> {
+  // "specific" (manual-lot) allocation has no historical data to replay for a
+  // backfill — there's no way to know which lots a user would have picked for
+  // a sell that predates this feature. Fall back to FIFO, a deterministic
+  // default, whenever the stored method is "specific"; fifo/average pass through.
+  const backfillMethod: CostBasisMethod =
+    method === "specific" ? "fifo" : method;
+
   const unmatchedSells = await fetchUnmatchedSellLots(userId);
   let reconciled = 0;
   const warnings: string[] = [];
@@ -42,13 +49,13 @@ export async function reconcileRealizedLots(
       sellLot = { ...sellLot, quantity: totalOpen };
     }
 
-    const matches = matchSell(sellLot, openBuyLots, method);
+    const matches = matchSell(sellLot, openBuyLots, backfillMethod);
     if (matches.length > 0) {
       await insertRealizedLots(
         userId,
         sell.instrumentId,
         sell.id,
-        method,
+        backfillMethod,
         sell.tradeDate,
         sell.price,
         sell.fxRate,
