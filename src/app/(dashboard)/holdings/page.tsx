@@ -105,6 +105,7 @@ const SORT_KEYS = [
   "dayPct",
   "source",
   "yield",
+  "units",
   "valueSGD",
   "assetGain",
   "fxGain",
@@ -912,6 +913,8 @@ export default function HoldingsPage() {
         return item.source || "￿"; // untagged sorts last
       case "yield":
         return item.dividendYield ?? item.dividendYieldAuto ?? -Infinity;
+      case "units":
+        return "totalUnits" in item ? item.totalUnits : item.units;
       case "valueSGD":
         return item.valueSGD;
       case "assetGain":
@@ -933,7 +936,7 @@ export default function HoldingsPage() {
   const hasFixedIncome = filteredRows.some((h) =>
     FIXED_INCOME_TYPES.has(h.assetType as AssetType),
   );
-  const colCount = hasFixedIncome ? 15 : 14;
+  const colCount = hasFixedIncome ? 16 : 15;
 
   const rows = [...filteredRows].sort((a, b) => {
     const va = sortVal(a, sort.k);
@@ -1119,6 +1122,9 @@ export default function HoldingsPage() {
               <Th>Broker</Th>
               <Th>Strategy</Th>
               <Th k="source">Source</Th>
+              <Th k="units" right>
+                Units
+              </Th>
               <Th k="price" right>
                 Price
               </Th>
@@ -1228,6 +1234,11 @@ export default function HoldingsPage() {
                         ) : (
                           <span className="text-muted">—</span>
                         )}
+                      </td>
+                      <td className={CELL_R}>
+                        <span className="font-mono text-secondary">
+                          {group.totalUnits.toLocaleString()}
+                        </span>
                       </td>
                       <td className={CELL_R}>
                         {ccyFmt(group.currentPrice, group.currency, 2)}
@@ -1373,6 +1384,19 @@ export default function HoldingsPage() {
                           ) : (
                             <span className="text-muted">—</span>
                           )}
+                        </td>
+                        <td className={LOT_CELL_R}>
+                          <span
+                            className="font-mono"
+                            style={{
+                              color: isSell
+                                ? "var(--loss)"
+                                : "var(--text-secondary)",
+                            }}
+                          >
+                            {isSell ? "−" : ""}
+                            {h.units.toLocaleString()}
+                          </span>
                         </td>
                         <td className={LOT_CELL_R}>
                           {ccyFmt(h.currentPrice, h.currency, 2)}
@@ -1555,6 +1579,19 @@ export default function HoldingsPage() {
                         ) : (
                           <span className="text-muted">—</span>
                         )}
+                      </td>
+                      <td className={CELL_R}>
+                        <span
+                          className="font-mono"
+                          style={{
+                            color: isSell
+                              ? "var(--loss)"
+                              : "var(--text-secondary)",
+                          }}
+                        >
+                          {isSell ? "−" : ""}
+                          {h.units.toLocaleString()}
+                        </span>
                       </td>
                       <td className={CELL_R}>
                         {ccyFmt(h.currentPrice, h.currency, 2)}
