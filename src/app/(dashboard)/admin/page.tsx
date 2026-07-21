@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getProviderFlags } from "@/lib/supabase/app-config";
+import { getCpfLifeRates, getProviderFlags } from "@/lib/supabase/app-config";
 import { RoleToggle } from "../../../components/RoleToggle";
 import { ActiveToggle } from "../../../components/ActiveToggle";
+import { CpfLifeRatesEditor } from "../../../components/CpfLifeRatesEditor";
 import { DeleteUserButton } from "../../../components/DeleteUserButton";
 import { isAdminRole } from "@/lib/roles";
 import type { CurrencyRow } from "@/app/api/currencies/route";
@@ -58,6 +59,7 @@ export default async function AdminPage() {
     { data: currencyRows },
     { data: exchangeRows },
     providerFlags,
+    cpfLifeRates,
   ] = await Promise.all([
     adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     supabase.from("user_settings").select("user_id, display_name, role"),
@@ -83,6 +85,7 @@ export default async function AdminPage() {
       .select("code, label, region, active, display_order")
       .order("display_order"),
     getProviderFlags(),
+    getCpfLifeRates(),
   ]);
 
   // Build per-user holding counts
@@ -500,6 +503,22 @@ export default async function AdminPage() {
             />
           ))}
         </div>
+      </div>
+
+      {/* CPF LIFE rate table */}
+      <div
+        className="card px-5 py-4.5 animate-reveal max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3"
+        style={{ animationDelay: ".35s" }}
+      >
+        <div className="mb-4 flex items-baseline justify-between max-bp600:flex-wrap max-bp600:items-center max-bp600:gap-2">
+          <span className="text-[13px] font-semibold tracking-[.01em] text-primary">
+            CPF LIFE Rates
+          </span>
+          <span className="font-ui text-[11px] text-secondary">
+            monthly payout per S$1,000 RA
+          </span>
+        </div>
+        <CpfLifeRatesEditor initial={cpfLifeRates} />
       </div>
     </div>
   );
