@@ -306,7 +306,7 @@ export function computePortfolioAnalytics(
   }
 
   const endingValueSgd = last.value;
-  const xirr = computeXIRR(buildXirrFlows(cashTransactions, endingValueSgd, last.date));
+  const xirr = computeXIRR(buildXirrFlows(cashTransactions, endingValueSgd, last.date)) * 100;
 
   const brokers = [...new Set(holdings.map((h) => h.broker).filter(Boolean))];
   const xirrByBroker = brokers.map((broker) => {
@@ -322,7 +322,7 @@ export function computePortfolioAnalytics(
       last.date,
       { broker },
     );
-    return { broker, xirr: computeXIRR(flows) };
+    return { broker, xirr: computeXIRR(flows) * 100 };
   });
 
   const sources = [...new Set(holdings.map((h) => h.source).filter(Boolean))];
@@ -339,7 +339,7 @@ export function computePortfolioAnalytics(
       last.date,
       { source },
     );
-    return { source, xirr: computeXIRR(flows) };
+    return { source, xirr: computeXIRR(flows) * 100 };
   });
 
   return {
