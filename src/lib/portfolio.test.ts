@@ -3,6 +3,7 @@ import {
   buildFxColors,
   buildBaseFxRates,
   computeHeroStats,
+  computeRealizedSummary,
   computeAllocationBySource,
   computeSharpeRatio,
   computeCAGR,
@@ -19,6 +20,7 @@ import {
 import type { HoldingRow } from "@/types/holding";
 import type { SnapshotRow } from "@/lib/supabase/data";
 import type { CurrencyCard } from "@/types/portfolio";
+import type { RealizedLot } from "@/types/realized";
 
 function makeRow(overrides: Partial<HoldingRow> = {}): HoldingRow {
   return {
@@ -97,6 +99,31 @@ function makeCard(overrides: Partial<CurrencyCard> = {}): CurrencyCard {
   };
 }
 
+function makeRealizedLot(overrides: Partial<RealizedLot> = {}): RealizedLot {
+  return {
+    id: "r1",
+    instrumentId: "i1",
+    ticker: "AAPL",
+    name: "Apple",
+    assetType: "Equity",
+    currency: "USD",
+    flag: "🇺🇸",
+    icon: "briefcase",
+    sellLotId: "s1",
+    buyLotId: "b1",
+    method: "fifo",
+    matchedQuantity: 5,
+    matchedBuyPrice: 100,
+    matchedBuyFx: 1.3,
+    sellPrice: 130,
+    sellFx: 1.35,
+    assetGainSgd: 200,
+    fxGainSgd: 10,
+    realizedDate: "2026-06-01",
+    ...overrides,
+  };
+}
+
 describe("buildFxColors", () => {
   it("maps each card's lowercased code to a palette color", () => {
     const cards = [makeCard({ code: "USD" }), makeCard({ code: "EUR" })];
@@ -147,8 +174,8 @@ describe("computeHeroStats", () => {
     ];
     const stats = computeHeroStats(holdings, []);
     expect(stats.total).toBeCloseTo(1620, 6);
-    expect(stats.totalGain).toBeCloseTo(320, 6);
-    expect(stats.totalGainPct).toBeCloseTo((320 / 1300) * 100, 6);
+    expect(stats.unrealizedGain).toBeCloseTo(320, 6);
+    expect(stats.unrealizedGainPct).toBeCloseTo((320 / 1300) * 100, 6);
     expect(stats.fxImpact).toBeCloseTo(50, 6);
     expect(stats.fxPct).toBeCloseTo((50 / 1300) * 100, 6);
     expect(stats.neutral).toBeCloseTo(1620 - 50, 6);
@@ -157,8 +184,8 @@ describe("computeHeroStats", () => {
   it("returns all-zero figures for an empty portfolio", () => {
     const stats = computeHeroStats([], []);
     expect(stats.total).toBe(0);
-    expect(stats.totalGain).toBe(0);
-    expect(stats.totalGainPct).toBe(0);
+    expect(stats.unrealizedGain).toBe(0);
+    expect(stats.unrealizedGainPct).toBe(0);
     expect(stats.fxPct).toBe(0);
     expect(stats.portfolioYield).toBe(0);
     expect(stats.annualIncome).toBe(0);
@@ -234,6 +261,49 @@ describe("computeHeroStats", () => {
   it("stamps an 'updated' string ending in SGT", () => {
     const stats = computeHeroStats([], []);
     expect(stats.updated.endsWith("SGT")).toBe(true);
+  });
+});
+
+describe("computeHeroStats — realized gain", () => {
+  it("sums realizedLots into realizedGain/realizedGainPct, independent of open positions", () => {
+    const holdings = [makeRow({ id: "b1", costSGD: 1300, valueSGD: 1620, fxGain: 50 })];
+    const realizedLots = [
+      makeRealizedLot({ matchedQuantity: 5, matchedBuyPrice: 100, matchedBuyFx: 1.3, assetGainSgd: 200, fxGainSgd: 10 }),
+    ];
+    const stats = computeHeroStats(holdings, [], realizedLots);
+    expect(stats.realizedGain).toBeCloseTo(210, 6);
+    expect(stats.realizedGainPct).toBeCloseTo((210 / 650) * 100, 6);
+  });
+
+  it("returns zero realizedGain/realizedGainPct when no realized lots are given (regression, default param)", () => {
+    const holdings = [makeRow({ id: "b1" })];
+    const stats = computeHeroStats(holdings, []);
+    expect(stats.realizedGain).toBe(0);
+    expect(stats.realizedGainPct).toBe(0);
+  });
+});
+
+describe("computeRealizedSummary", () => {
+  it("excludes a ticker that still has an open position", () => {
+    const holdings = [makeRow({ id: "b1", ticker: "AAPL", units: 5 })];
+    const realizedLots = [makeRealizedLot({ ticker: "AAPL" })];
+    const closed = computeRealizedSummary(holdings, realizedLots);
+    expect(closed).toHaveLength(0);
+  });
+
+  it("includes a fully-closed ticker with aggregated totals across multiple realized lots", () => {
+    const holdings: HoldingRow[] = [];
+    const realizedLots = [
+      makeRealizedLot({ ticker: "AAPL", matchedQuantity: 5, assetGainSgd: 200, fxGainSgd: 10, realizedDate: "2026-06-01" }),
+      makeRealizedLot({ ticker: "AAPL", id: "r2", matchedQuantity: 3, assetGainSgd: 90, fxGainSgd: 5, realizedDate: "2026-06-15" }),
+    ];
+    const closed = computeRealizedSummary(holdings, realizedLots);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].totalQuantitySold).toBeCloseTo(8, 6);
+    expect(closed[0].realizedGainSgd).toBeCloseTo(305, 6);
+    expect(closed[0].assetGainSgd).toBeCloseTo(290, 6);
+    expect(closed[0].fxGainSgd).toBeCloseTo(15, 6);
+    expect(closed[0].lastSaleDate).toBe("2026-06-15");
   });
 });
 

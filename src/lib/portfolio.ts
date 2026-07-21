@@ -11,6 +11,7 @@ import type {
   FxSeriesPoint,
   PortfolioAnalytics,
 } from "@/types/portfolio";
+import type { RealizedLot, ClosedPosition } from "@/types/realized";
 import {
   computeCostBasisSGD,
   computeAssetGainSGD,
@@ -63,16 +64,28 @@ export function buildBaseFxRates(
 export function computeHeroStats(
   holdings: HoldingRow[],
   snapshots: SnapshotRow[] = [],
+  realizedLots: RealizedLot[] = [],
 ): HeroStats {
   // Net out sells so totals reflect what's actually held, not gross lots.
   const positions = toNetPositions(holdings);
   const total = positions.reduce((s, h) => s + h.valueSGD, 0);
   const cost = positions.reduce((s, h) => s + h.costSGD, 0);
-  const totalGain = total - cost;
-  const totalGainPct = cost > 0 ? (totalGain / cost) * 100 : 0;
+  const unrealizedGain = total - cost;
+  const unrealizedGainPct = cost > 0 ? (unrealizedGain / cost) * 100 : 0;
   const fxImpact = positions.reduce((s, h) => s + h.fxGain, 0);
   const fxPct = cost > 0 ? (fxImpact / cost) * 100 : 0;
   const neutral = total - fxImpact;
+
+  const realizedGain = realizedLots.reduce(
+    (s, r) => s + r.assetGainSgd + r.fxGainSgd,
+    0,
+  );
+  const realizedCostBasis = realizedLots.reduce(
+    (s, r) => s + r.matchedQuantity * r.matchedBuyPrice * r.matchedBuyFx,
+    0,
+  );
+  const realizedGainPct =
+    realizedCostBasis > 0 ? (realizedGain / realizedCostBasis) * 100 : 0;
 
   // Day change from the most recent two distinct-date snapshots
   const today = new Date().toISOString().slice(0, 10);
@@ -96,8 +109,10 @@ export function computeHeroStats(
     total,
     dayChange,
     dayPct,
-    totalGain,
-    totalGainPct,
+    unrealizedGain,
+    unrealizedGainPct,
+    realizedGain,
+    realizedGainPct,
     fxImpact,
     fxPct,
     neutral,
@@ -105,6 +120,48 @@ export function computeHeroStats(
     portfolioYield,
     annualIncome,
   };
+}
+
+// Per-ticker lifetime realized totals, restricted to tickers with zero net
+// open units left (still-open tickers with a partial sell are excluded here —
+// their realized gain is already folded into hero.realizedGain, but they
+// belong on the Holdings "Open" view, not "Closed").
+export function computeRealizedSummary(
+  holdings: HoldingRow[],
+  realizedLots: RealizedLot[],
+): ClosedPosition[] {
+  const openTickers = new Set(toNetPositions(holdings).map((h) => h.ticker));
+
+  const byTicker = new Map<string, ClosedPosition>();
+  for (const r of realizedLots) {
+    const gain = r.assetGainSgd + r.fxGainSgd;
+    const existing = byTicker.get(r.ticker);
+    if (existing) {
+      existing.totalQuantitySold += r.matchedQuantity;
+      existing.realizedGainSgd += gain;
+      existing.assetGainSgd += r.assetGainSgd;
+      existing.fxGainSgd += r.fxGainSgd;
+      if (r.realizedDate > existing.lastSaleDate) existing.lastSaleDate = r.realizedDate;
+    } else {
+      byTicker.set(r.ticker, {
+        ticker: r.ticker,
+        name: r.name,
+        assetType: r.assetType,
+        currency: r.currency,
+        flag: r.flag,
+        icon: r.icon,
+        totalQuantitySold: r.matchedQuantity,
+        realizedGainSgd: gain,
+        assetGainSgd: r.assetGainSgd,
+        fxGainSgd: r.fxGainSgd,
+        lastSaleDate: r.realizedDate,
+      });
+    }
+  }
+
+  return Array.from(byTicker.values())
+    .filter((p) => !openTickers.has(p.ticker))
+    .sort((a, b) => b.lastSaleDate.localeCompare(a.lastSaleDate));
 }
 
 export function computeAllocationBySource(holdings: HoldingRow[]): AllocationBySource[] {
