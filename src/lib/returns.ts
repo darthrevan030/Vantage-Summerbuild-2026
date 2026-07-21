@@ -30,13 +30,34 @@ export function computeTotalValueSeries(
 // net external flow on the LATER day of each sub-period before computing the
 // return — a deposit/withdrawal on that day is capital moving, not gain/loss.
 // With no flows, r reduces exactly to the naive value[i]/value[i-1]-1.
+//
+// The value series only has points on dates where a snapshot exists, but a
+// flow can land on any date in between. A flow is therefore rolled forward
+// to the FIRST sub-period whose ending snapshot date is >= the flow's date
+// — that's the first point in the series that actually reflects the flow's
+// cash (see computeTotalValueSeries's `t.date <= snapshotDate` overlay).
+// Flows on-or-before the very first series date are already baked into that
+// starting value and don't affect any sub-period return. Flows after the
+// last series date have no sub-period to attribute to and are dropped.
 export function computeFlowAdjustedReturns(
   series: { date: string; value: number }[],
   flows: { date: string; amountSgd: number }[],
 ): { date: string; r: number }[] {
   const flowsByDate = new Map<string, number>();
-  for (const f of flows) {
-    flowsByDate.set(f.date, (flowsByDate.get(f.date) ?? 0) + f.amountSgd);
+  if (series.length > 0) {
+    const firstDate = series[0].date;
+    for (const f of flows) {
+      if (f.date <= firstDate) continue;
+      let bucketDate: string | undefined;
+      for (let i = 1; i < series.length; i++) {
+        if (series[i].date >= f.date) {
+          bucketDate = series[i].date;
+          break;
+        }
+      }
+      if (bucketDate === undefined) continue;
+      flowsByDate.set(bucketDate, (flowsByDate.get(bucketDate) ?? 0) + f.amountSgd);
+    }
   }
   const out: { date: string; r: number }[] = [];
   for (let i = 1; i < series.length; i++) {

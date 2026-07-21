@@ -100,6 +100,51 @@ describe("computeFlowAdjustedReturns", () => {
     const returns = computeFlowAdjustedReturns(series, flows);
     expect(returns[0].r).toBeCloseTo(0.1, 9);
   });
+
+  it("rolls a flow dated between two snapshots forward to the next snapshot date, not dropping it", () => {
+    // Flat holdings (no growth) between 2026-01-01 and 2026-01-08, but a
+    // 5000 deposit lands on 2026-01-05 — a date the series has no point
+    // for. computeTotalValueSeries's cash overlay means that deposit is
+    // already included in the 2026-01-08 value (10000 holdings + 5000
+    // cash = 15000). The "real" return is 0% (flat holdings); before the
+    // fix this was misread as +50% because the flow, keyed under
+    // "2026-01-05", never matched series[1].date exactly and was silently
+    // dropped from the lookup.
+    const series = [
+      { date: "2026-01-01", value: 10000 },
+      { date: "2026-01-08", value: 15000 },
+    ];
+    const flows = [{ date: "2026-01-05", amountSgd: 5000 }];
+    const returns = computeFlowAdjustedReturns(series, flows);
+    expect(returns).toHaveLength(1);
+    expect(returns[0]).toEqual({ date: "2026-01-08", r: 0 });
+  });
+
+  it("still lands a flow exactly on a snapshot date in that same sub-period, not shifted forward", () => {
+    // Three-point series; a flow dated exactly on the middle snapshot must
+    // be attributed to the 01-02 sub-period (not rolled forward to 01-03).
+    const series = [
+      { date: "2026-01-01", value: 1000 },
+      { date: "2026-01-02", value: 1600 },
+      { date: "2026-01-03", value: 1600 },
+    ];
+    const flows = [{ date: "2026-01-02", amountSgd: 500 }];
+    const returns = computeFlowAdjustedReturns(series, flows);
+    expect(returns).toHaveLength(2);
+    expect(returns[0].r).toBeCloseTo(0.1, 9); // (1600 - 500 - 1000) / 1000
+    expect(returns[1].r).toBeCloseTo(0, 9); // (1600 - 0 - 1600) / 1600, flow not double-counted here
+  });
+
+  it("drops a flow dated after every snapshot in the series", () => {
+    const series = [
+      { date: "2026-01-01", value: 1000 },
+      { date: "2026-01-02", value: 1100 },
+    ];
+    const flows = [{ date: "2026-01-10", amountSgd: 5000 }];
+    const returns = computeFlowAdjustedReturns(series, flows);
+    expect(returns).toHaveLength(1);
+    expect(returns[0]).toEqual({ date: "2026-01-02", r: 0.1 });
+  });
 });
 
 describe("computeTWR", () => {
