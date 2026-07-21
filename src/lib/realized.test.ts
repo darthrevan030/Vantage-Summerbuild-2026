@@ -123,4 +123,27 @@ describe("matchSell — specific", () => {
       ]),
     ).toThrow(InvalidAllocationError);
   });
+
+  it("throws InvalidAllocationError when the allocation references a lot that isn't open", () => {
+    expect(() =>
+      matchSell({ ...sell, quantity: 10 }, [b1], "specific", [
+        { buyLotId: "does-not-exist", quantity: 10 },
+      ]),
+    ).toThrow(InvalidAllocationError);
+  });
+
+  it("throws InvalidAllocationError when an allocation quantity is zero or negative", () => {
+    expect(() =>
+      matchSell({ ...sell, quantity: 10 }, [b1, b2], "specific", [
+        { buyLotId: "b1", quantity: 0 },
+        { buyLotId: "b2", quantity: 10 },
+      ]),
+    ).toThrow(InvalidAllocationError);
+    expect(() =>
+      matchSell({ ...sell, quantity: 10 }, [b1, b2], "specific", [
+        { buyLotId: "b1", quantity: -5 },
+        { buyLotId: "b2", quantity: 15 },
+      ]),
+    ).toThrow(InvalidAllocationError);
+  });
 });
