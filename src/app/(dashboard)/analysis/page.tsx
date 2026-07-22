@@ -839,7 +839,13 @@ export default function AnalysisPage() {
     // Kick off news pre-fetch for all holdings in parallel with the AI call.
     // This populates HL_CACHE so every SentDrawer opens instantly with fresh
     // headlines instead of fetching one symbol at a time on expand.
-    const ids = positions.map((p) => ({ id: p.id, name: p.name }));
+    // Key by the same ticker-based id the SentDrawers use (never the holding
+    // UUID) so the prefetch actually populates HL_CACHE and the bulk request
+    // sends real tickers, not UUIDs that fail SYMBOL_RE.
+    const ids = positions.map((p, i) => ({
+      id: p.ticker !== "—" ? p.ticker : p.assetType + "_" + i,
+      name: p.name,
+    }));
     prefetchAllNews(ids); // intentionally not awaited — fire and forget
     let res: AnalysisData;
     try {
