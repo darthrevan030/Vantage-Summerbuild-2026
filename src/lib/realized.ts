@@ -120,6 +120,7 @@ export function matchSell(
     // absorb it into the last allocation so the total is exact.
     const allocatedTotal = allocations.reduce((s, a) => s + a.qty, 0);
     const diff = sellLot.quantity - allocatedTotal;
+    /* v8 ignore next 3 -- defensive: proportional/FIFO residuals stay below EPS for realistic inputs */
     if (Math.abs(diff) > EPS && allocations.length > 0) {
       allocations[allocations.length - 1].qty += diff;
     }

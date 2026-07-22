@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeNetContributions, computeLegacySeedAmount } from "./contributions";
+import { computeNetContributions, computeLegacySeedAmount } from "@/lib/contributions";
 import type { CashTransaction } from "@/types/cash";
 import type { HoldingRow } from "@/types/holding";
 
@@ -120,6 +120,13 @@ describe("computeLegacySeedAmount", () => {
     const seed = computeLegacySeedAmount([lot1, lot2, sell]);
     expect(seed).not.toBeNull();
     expect(seed!.amountSgd).toBeCloseTo(1654.4, 6);
+    expect(seed!.earliestDate).toBe("2025-01-01");
+  });
+
+  it("takes the earlier date when a later-listed lot predates the first", () => {
+    const later = makeHolding({ id: "b1", buyDate: "2025-06-01", transactionType: "buy" });
+    const earlier = makeHolding({ id: "b2", buyDate: "2025-01-01", transactionType: "buy" });
+    const seed = computeLegacySeedAmount([later, earlier]);
     expect(seed!.earliestDate).toBe("2025-01-01");
   });
 });

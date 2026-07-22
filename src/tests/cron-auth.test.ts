@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { authorizeCron } from "./cron-auth";
+import { authorizeCron } from "@/lib/snapshots/cron-auth";
 
 function req(headers: Record<string, string>): Request {
   return new Request("http://x/api/internal/snapshot-all", { headers });

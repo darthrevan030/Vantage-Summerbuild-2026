@@ -6,7 +6,7 @@ import {
   annualise,
   computeXIRR,
   buildXirrFlows,
-} from "./returns";
+} from "@/lib/returns";
 import type { CashTransaction } from "@/types/cash";
 import type { SnapshotRow } from "@/lib/supabase/data";
 

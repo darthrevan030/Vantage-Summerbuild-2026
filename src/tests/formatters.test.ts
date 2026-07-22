@@ -8,7 +8,7 @@ import {
   CCY_SYMBOL,
   CCY_FLAG,
   SUPPORTED_CURRENCIES,
-} from "./formatters";
+} from "@/lib/formatters";
 
 describe("NF", () => {
   it("formats a positive integer with grouping and no decimals by default", () => {

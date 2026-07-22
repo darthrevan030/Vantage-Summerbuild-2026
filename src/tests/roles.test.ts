@@ -5,7 +5,7 @@ import {
   isSuperadminRole,
   canDeleteRole,
   canSetRole,
-} from "./roles";
+} from "@/lib/roles";
 
 describe("ROLES", () => {
   it("lists the three tiers in ascending order", () => {

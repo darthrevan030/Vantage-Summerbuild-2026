@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sgtDate, isSnapshotStaleForDay } from "./dates";
+import { sgtDate, isSnapshotStaleForDay } from "@/lib/dates";
 
 describe("sgtDate", () => {
   it("returns the Asia/Singapore calendar date as YYYY-MM-DD", () => {

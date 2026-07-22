@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dateRange, fillForward, buildSnapshotRows } from "./build";
+import { dateRange, fillForward, buildSnapshotRows } from "@/lib/snapshots/build";
 import type { LotLite } from "@/lib/history";
 
 function lot(o: Partial<LotLite> = {}): LotLite {

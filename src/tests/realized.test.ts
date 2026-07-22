@@ -4,7 +4,7 @@ import {
   InsufficientOpenQuantityError,
   InvalidAllocationError,
   type OpenBuyLot,
-} from "./realized";
+} from "@/lib/realized";
 
 const b1: OpenBuyLot = {
   id: "b1",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { netUnitsAsOf, computeSnapshotAsOf, type LotLite } from "./history";
+import { netUnitsAsOf, computeSnapshotAsOf, type LotLite } from "@/lib/history";
 
 function lot(o: Partial<LotLite> = {}): LotLite {
   return {
