@@ -321,3 +321,65 @@ describe("textRelevance precision & recall regressions", () => {
     ).toBeLessThan(RELEVANCE_FLOOR);
   });
 });
+
+describe("normalizeUrl invalid input", () => {
+  it("falls back to the lowercased raw string when the url can't be parsed", () => {
+    expect(normalizeUrl("not a url")).toBe("not a url");
+  });
+});
+
+describe("normalizeAlphaVantage sentiment + missing fields", () => {
+  it("maps a bearish label to neg", () => {
+    const out = normalizeAlphaVantage(
+      [{ title: "Downgrade hits shares", overall_sentiment_label: "Bearish", url: "" }],
+      "X",
+    );
+    expect(out[0].sent).toBe("neg");
+  });
+  it("falls back to keyword tagging with ts=0 when label and time are absent", () => {
+    const out = normalizeAlphaVantage([{ title: "Shares surge to record profit", url: "" }], "X");
+    expect(out[0].sent).toBe("pos"); // POS keyword via tag()
+    expect(out[0].ts).toBe(0); // no time_published
+    expect(out[0].providerRel).toBeUndefined(); // no ticker_sentiment
+  });
+});
+
+describe("normalizeNewsApi mapping", () => {
+  it("maps articles into RawItem with a parsed timestamp", () => {
+    const out = normalizeNewsApi([
+      {
+        title: "Apple gains on strong guidance",
+        description: "up",
+        source: { name: "Reuters" },
+        url: "https://r.com/1",
+        publishedAt: "2026-01-15T10:00:00Z",
+      },
+    ]);
+    expect(out[0]).toMatchObject({
+      t: "Apple gains on strong guidance",
+      url: "https://r.com/1",
+      provider: "newsapi",
+    });
+    expect(out[0].summary).toContain("up");
+    expect(out[0].ts).toBeGreaterThan(0);
+  });
+  it("defaults source to NewsAPI and ts to 0 when fields are missing", () => {
+    const out = normalizeNewsApi([{ title: "Untitled source article" }]);
+    expect(out[0].src).toBe("NewsAPI");
+    expect(out[0].ts).toBe(0);
+  });
+});
+
+describe("normalizer default branches", () => {
+  it("defaults AV url to empty and skips ticker_sentiment entries missing a ticker", () => {
+    const out = normalizeAlphaVantage(
+      [{ title: "X moves higher", ticker_sentiment: [{ relevance_score: "0.5" }, { ticker: "X", relevance_score: "0.9" }] }],
+      "X",
+    );
+    expect(out[0].url).toBe("");
+    expect(out[0].providerRel).toBeCloseTo(0.9, 6);
+  });
+  it("skips a NewsAPI article with no title", () => {
+    expect(normalizeNewsApi([{ description: "no title" }])).toEqual([]);
+  });
+});

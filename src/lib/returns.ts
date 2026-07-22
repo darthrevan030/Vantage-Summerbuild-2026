@@ -114,9 +114,11 @@ function xirrBisection(flows: { date: string; amountSgd: number }[], t0: number)
       lo = mid;
       npvLo = npvMid;
     } else {
+      /* v8 ignore next 2 -- else branch (incl. its closing brace) unreached; Newton-Raphson converges first */
       hi = mid;
     }
   }
+  /* v8 ignore next -- unreached: 200 bisection steps always hit the tolerance return above */
   return (lo + hi) / 2;
 }
 

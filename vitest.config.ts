@@ -14,9 +14,10 @@ export default defineConfig({
       reporter: ["text", "html"],
       include: ["src/lib/**/*.ts"],
       exclude: [
-        "src/lib/**/*.test.ts",
         "src/lib/seed.ts",
         "src/lib/api-client.ts",
+        "src/lib/snapshots/fetch.ts", // network fetcher (EODHD/Frankfurter/Yahoo), like prices.ts/providers
+        "src/lib/reconcile-cash.ts", // thin DB-orchestration glue over the excluded supabase/data layer
         "src/lib/supabase/**",
         "src/lib/providers/**",
         "src/lib/pdf-parsers/**",

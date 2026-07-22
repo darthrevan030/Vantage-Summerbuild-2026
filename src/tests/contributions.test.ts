@@ -122,4 +122,11 @@ describe("computeLegacySeedAmount", () => {
     expect(seed!.amountSgd).toBeCloseTo(1654.4, 6);
     expect(seed!.earliestDate).toBe("2025-01-01");
   });
+
+  it("takes the earlier date when a later-listed lot predates the first", () => {
+    const later = makeHolding({ id: "b1", buyDate: "2025-06-01", transactionType: "buy" });
+    const earlier = makeHolding({ id: "b2", buyDate: "2025-01-01", transactionType: "buy" });
+    const seed = computeLegacySeedAmount([later, earlier]);
+    expect(seed!.earliestDate).toBe("2025-01-01");
+  });
 });

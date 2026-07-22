@@ -12,6 +12,7 @@ import {
   remapAllocations,
   backupLotToCommitInput,
   BACKUP_SCHEMA,
+  BACKUP_VERSION,
 } from "@/lib/portfolio-io";
 import type { Holding } from "@/types/holding";
 import type { RealizedLot } from "@/types/realized";
@@ -112,6 +113,15 @@ describe("parseBackup", () => {
   it("accepts a valid envelope", () => {
     const env = buildBackupEnvelope([holding({})], [], "t");
     expect(parseBackup(JSON.stringify(env)).lots).toHaveLength(1);
+  });
+  it("rejects invalid JSON with a friendly message", () => {
+    expect(() => parseBackup("{not valid json")).toThrow(/valid JSON/i);
+  });
+  it("defaults sells to {} when the sells field is missing", () => {
+    const env = parseBackup(
+      JSON.stringify({ schema: BACKUP_SCHEMA, version: BACKUP_VERSION, lots: [], exportedAt: "t" }),
+    );
+    expect(env.sells).toEqual({});
   });
 });
 

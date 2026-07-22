@@ -567,6 +567,20 @@ describe("computePortfolioAnalytics", () => {
     expect(result.xirrByBroker).toHaveLength(1);
     expect(result.xirrByBroker[0].broker).toBe("IBKR");
   });
+
+  it("computes a per-source XIRR bucket when holdings/cash are tagged with a source", () => {
+    const snapshots = [
+      makeSnapshot({ recordedDate: "2026-01-01", valueSgd: 1000 }),
+      makeSnapshot({ recordedDate: "2027-01-01", valueSgd: 1000 }),
+    ];
+    const holdings = [makeRow({ id: "h1", source: "SRS", valueSGD: 500, costSGD: 500 })];
+    const cashTransactions = [
+      makeCashTx({ date: "2026-01-01", type: "deposit", amount: 500, fxRate: 1, source: "SRS" }),
+    ];
+    const result = computePortfolioAnalytics(snapshots, cashTransactions, holdings);
+    expect(result.xirrBySource).toHaveLength(1);
+    expect(result.xirrBySource[0].source).toBe("SRS");
+  });
 });
 
 describe("computeAllocationByAsset", () => {
