@@ -1352,3 +1352,26 @@ export async function insertLegacyCashSeed(
   });
   if (error) console.error("[insertLegacyCashSeed]", error.message);
 }
+
+// Distinct user ids that hold at least one lot — the cron's work-list. Uses the
+// admin client so RLS doesn't hide other users' lots. Paged past the 1000-row cap.
+export async function fetchActiveUserIds(): Promise<string[]> {
+  const admin = createAdminClient();
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  for (let fromRow = 0; ; fromRow += PAGE) {
+    const { data, error } = await admin
+      .from("lots")
+      .select("user_id")
+      .order("user_id", { ascending: true })
+      .range(fromRow, fromRow + PAGE - 1);
+    if (error) {
+      console.error("[fetchActiveUserIds]", error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data) ids.add(r.user_id as string);
+    if (data.length < PAGE) break;
+  }
+  return [...ids];
+}
