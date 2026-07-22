@@ -386,7 +386,7 @@ function SentDrawer({
                     />
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">
-                        {h.url ? (
+                        {h.url && /^https?:\/\//i.test(h.url) ? (
                           <a
                             href={h.url}
                             target="_blank"
