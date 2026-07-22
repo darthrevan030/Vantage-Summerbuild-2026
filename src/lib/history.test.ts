@@ -88,15 +88,23 @@ describe("computeSnapshotAsOf", () => {
   });
 
   it("keeps two untickered physical assets separate and prices them at cost", () => {
-    // Both ticker "—" but different ids → must not merge; no market feed.
+    // Both ticker "—" but different ids AND currencies → must stay separate.
+    // If wrongly merged under the shared "—" ticker, the group would take the
+    // first lot's currency (SGD) and mis-price the USD asset, failing this test.
     const lots = [
-      lot({ id: "g1", ticker: "—", units: 1, buyPrice: 3000 }),
-      lot({ id: "g2", ticker: "—", units: 2, buyPrice: 3000 }),
+      lot({ id: "g1", ticker: "—", units: 1, buyPrice: 1000, buyFxRate: 1, currency: "SGD" }),
+      lot({ id: "re1", ticker: "—", units: 1, buyPrice: 1000, buyFxRate: 1, currency: "USD" }),
     ];
-    const s = computeSnapshotAsOf(lots, "2026-06-01", () => 99999, fxSgd);
-    // Priced at own cost, not the (ignored) priceOf feed: (1+2) x 3000
-    expect(s.valueSgd).toBe(9000);
-    expect(s.costSgd).toBe(9000);
+    const s = computeSnapshotAsOf(
+      lots,
+      "2026-06-01",
+      () => 99999, // untickered assets must ignore the market feed
+      (ccy) => (ccy === "USD" ? 1.5 : 1),
+    );
+    expect(s.valueSgd).toBe(2500); // 1000 (SGD) + 1000 x 1.5 (USD)
+    expect(s.costSgd).toBe(2000); // 1000 + 1000 x 1.0
+    expect(s.fxImpactSgd).toBeCloseTo(500, 6); // USD: 1000 x (1.5 - 1.0)
+    expect(s.fxByCurrency.usd).toBeCloseTo(500, 6);
   });
 
   it("uses each buy lot's weighted-average cost", () => {
