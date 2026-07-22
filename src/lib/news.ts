@@ -98,7 +98,10 @@ export function extractQueryTokens(symbol: string, name?: string): QueryTokens {
     .replace(NAME_SUFFIX_RE, " ")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3);
+    // Keep tokens >=3 chars, but drop pure-numeric ones ("500", "100"): a bare
+    // index number is too generic and matches unrelated figures in headlines
+    // (e.g. "500" hitting "25,500 crore"). Distinctive tokens like "ftse" stay.
+    .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
   return { ticker, nameTokens };
 }
 
@@ -108,8 +111,12 @@ export function textRelevance(text: string, tokens: QueryTokens): number {
     new RegExp(`\\b${escapeRegExp(needle)}\\b`).test(hay);
   const tickerHit = tokens.ticker.length > 0 && hit(tokens.ticker.toLowerCase());
   const nameHits = tokens.nameTokens.filter(hit).length;
-  const nameCoverage =
-    tokens.nameTokens.length > 0 ? nameHits / tokens.nameTokens.length : 0;
+  // Cap the denominator so multi-word fund names aren't over-penalized: matching
+  // ~2 distinctive tokens counts as full name coverage. Without this, a 4-token
+  // name like "Vanguard FTSE All-World" would need 3 hits in one headline to
+  // clear the floor, so a broad ETF surfaces no news at all.
+  const nameDenom = Math.min(tokens.nameTokens.length, 2);
+  const nameCoverage = nameDenom > 0 ? Math.min(1, nameHits / nameDenom) : 0;
   const score = (tickerHit ? W_TICKER : 0) + W_NAME * nameCoverage;
   return Math.min(1, Math.max(0, score));
 }

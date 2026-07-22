@@ -8,6 +8,7 @@ import {
   extractQueryTokens,
   textRelevance,
   compositeRelevance,
+  RELEVANCE_FLOOR,
 } from "./news";
 import {
   normalizeUrl,
@@ -225,5 +226,40 @@ describe("mergeAndRank", () => {
       { t: "weather report", src: "R", sent: "neu" as const, ago: "1h", url: "", ts: 1, summary: "weather report", provider: "newsapi" as const },
     ];
     expect(mergeAndRank(raw, "D05.SG", "DBS Group")).toEqual([]);
+  });
+});
+
+describe("extractQueryTokens numeric tokens", () => {
+  it("drops pure-numeric name tokens but keeps distinctive words", () => {
+    // "SP 500": "sp" is too short, "500" is pure-numeric → nothing usable.
+    expect(extractQueryTokens("CSPX.LSE", "SP 500").nameTokens).toEqual([]);
+    // "FTSE 100": drop the number, keep "ftse".
+    expect(extractQueryTokens("ISF.LSE", "FTSE 100 ETF").nameTokens).toEqual(["ftse"]);
+  });
+});
+
+describe("textRelevance precision & recall regressions", () => {
+  it("does not match a generic index number in an unrelated headline", () => {
+    // Regression: '500' from 'SP 500' used to match '25,500' in this headline.
+    const t = extractQueryTokens("CSPX.LSE", "SP 500");
+    expect(
+      textRelevance("Shapoorji Pallonji kicks off Rs 25,500 crore refinancing", t),
+    ).toBe(0);
+  });
+
+  it("clears the floor for a multi-word fund name when >=2 distinctive tokens match", () => {
+    // Regression: a 4-token fund name used to need 3 hits to clear the floor,
+    // so a broad ETF surfaced no news at all.
+    const t = extractQueryTokens("VWRA.LSE", "Vanguard FTSE All-World UCITS ETF");
+    expect(
+      textRelevance("Vanguard All-World ETF sees record inflows", t),
+    ).toBeGreaterThanOrEqual(RELEVANCE_FLOOR);
+  });
+
+  it("still filters a single generic token for a multi-word fund name", () => {
+    const t = extractQueryTokens("VWRA.LSE", "Vanguard FTSE All-World UCITS ETF");
+    expect(
+      textRelevance("Vanguard cuts fees across its bond lineup", t),
+    ).toBeLessThan(RELEVANCE_FLOOR);
   });
 });
