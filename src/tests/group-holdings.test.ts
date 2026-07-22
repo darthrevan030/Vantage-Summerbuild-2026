@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupHoldings, toNetPositions } from "./group-holdings";
+import { groupHoldings, toNetPositions } from "@/lib/group-holdings";
 import type { HoldingRow } from "@/types/holding";
 
 function makeRow(overrides: Partial<HoldingRow> = {}): HoldingRow {

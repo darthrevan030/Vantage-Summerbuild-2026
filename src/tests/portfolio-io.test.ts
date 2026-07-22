@@ -12,7 +12,7 @@ import {
   remapAllocations,
   backupLotToCommitInput,
   BACKUP_SCHEMA,
-} from "./portfolio-io";
+} from "@/lib/portfolio-io";
 import type { Holding } from "@/types/holding";
 import type { RealizedLot } from "@/types/realized";
 

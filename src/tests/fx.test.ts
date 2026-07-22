@@ -4,7 +4,7 @@ import {
   computeCostBasisSGD,
   computeAssetGainSGD,
   computeFxGainSGD,
-} from "./fx";
+} from "@/lib/fx";
 import type { Holding } from "@/types/holding";
 
 function makeHolding(overrides: Partial<Holding> = {}): Holding {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeNetContributions, computeLegacySeedAmount } from "./contributions";
+import { computeNetContributions, computeLegacySeedAmount } from "@/lib/contributions";
 import type { CashTransaction } from "@/types/cash";
 import type { HoldingRow } from "@/types/holding";
 

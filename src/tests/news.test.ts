@@ -9,7 +9,7 @@ import {
   textRelevance,
   compositeRelevance,
   RELEVANCE_FLOOR,
-} from "./news";
+} from "@/lib/news";
 import {
   normalizeUrl,
   titleTokens,
@@ -20,7 +20,7 @@ import {
   normalizeNewsApi,
   mergeAndRank,
   type Scored,
-} from "./news";
+} from "@/lib/news";
 
 describe("tag", () => {
   it("detects positive / negative / neutral headlines", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateLotInput } from "./commit-lot";
+import { validateLotInput } from "@/lib/holdings/commit-lot";
 
 const ok = {
   ticker: "AAPL",

@@ -16,7 +16,7 @@ import {
   generatePortfolioSeriesDaily,
   generatePortfolioSeries,
   generateFxSeries,
-} from "./portfolio";
+} from "@/lib/portfolio";
 import type { HoldingRow } from "@/types/holding";
 import type { SnapshotRow } from "@/lib/supabase/data";
 import type { CurrencyCard } from "@/types/portfolio";
