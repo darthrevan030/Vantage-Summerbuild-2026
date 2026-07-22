@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { HoldingRow } from "@/types/holding";
 import type { UserSettings, CostBasisMethod } from "@/types/settings";
@@ -35,7 +36,7 @@ async function makeServerClient() {
   );
 }
 
-type ServerClient = Awaited<ReturnType<typeof makeServerClient>>;
+type ServerClient = SupabaseClient;
 
 // ── Normalised DB row shapes ──────────────────────────────────────────────────
 // User data lives in `lots` + `instruments`; shared market data in `ticker_quotes`
@@ -209,8 +210,11 @@ async function hydrateLot(
   );
 }
 
-export async function fetchHoldings(userId: string): Promise<HoldingRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchHoldings(
+  userId: string,
+  client?: ServerClient,
+): Promise<HoldingRow[]> {
+  const supabase = client ?? (await makeServerClient());
 
   // 1. lots + embedded instrument (single FK join)
   const { data: lotsData, error } = await supabase
@@ -775,8 +779,11 @@ export interface SnapshotRow {
 // snapshot history comes through regardless of that cap or how many rows accrue.
 const SNAPSHOT_PAGE = 1000;
 
-export async function fetchSnapshots(userId: string): Promise<SnapshotRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchSnapshots(
+  userId: string,
+  client?: ServerClient,
+): Promise<SnapshotRow[]> {
+  const supabase = client ?? (await makeServerClient());
   const rows: SnapshotRow[] = [];
 
   for (let from = 0; ; from += SNAPSHOT_PAGE) {

@@ -107,7 +107,7 @@ export async function proxy(request: NextRequest) {
   // Internal service routes (e.g. the scheduled snapshot cron) authenticate via
   // a shared secret inside the route handler, not a user session — exempt them
   // from the login redirect so the caller reaches the route's own guard.
-  const isInternalApi = pathname.startsWith("/api/internal");
+  const isInternalApi = pathname.startsWith("/api/internal/");
 
   if (!user && !isAuthPath && !isLanding && !isInternalApi) {
     const url = request.nextUrl.clone();

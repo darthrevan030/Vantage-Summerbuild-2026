@@ -14,10 +14,16 @@ import { authorizeCron } from "@/lib/snapshots/cron-auth";
 
 export const maxDuration = 60;
 
-export async function POST(req: Request) {
+async function handler(req: Request) {
   if (!authorizeCron(req, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Created once and reused for both reads and the write below: the cron has
+  // no Supabase session cookie, so the anon/SSR client would have auth.uid()
+  // NULL and RLS would return zero rows for every user. The admin client
+  // bypasses RLS so reads see real data.
+  const admin = createAdminClient();
 
   const today = sgtDate();
   const userIds = await fetchActiveUserIds();
@@ -26,9 +32,9 @@ export async function POST(req: Request) {
   // Per user: holdings + their missing-day window start.
   const perUser = await Promise.all(
     userIds.map(async (id) => {
-      const holdings = await fetchHoldings(id);
+      const holdings = await fetchHoldings(id, admin);
       if (holdings.length === 0) return null;
-      const snaps = await fetchSnapshots(id);
+      const snaps = await fetchSnapshots(id, admin);
       const earliest = holdings.reduce(
         (min, h) => (h.buyDate < min ? h.buyDate : min),
         holdings[0].buyDate,
@@ -69,7 +75,6 @@ export async function POST(req: Request) {
     fetchWindowFx({ currencies, from: globalFrom, to: today, providers }),
   ]);
 
-  const admin = createAdminClient();
   let totalRows = 0;
   for (const u of active) {
     const dates = dateRange(u.start!, today);
@@ -99,6 +104,11 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ users: active.length, rows: totalRows });
 }
+
+// Vercel Cron issues GET requests; other callers (or manual triggers) may use
+// POST. Both share the same secret-gated handler.
+export const GET = handler;
+export const POST = handler;
 
 // Next calendar day for a YYYY-MM-DD string.
 function nextDay(date: string): string {
