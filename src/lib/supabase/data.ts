@@ -12,6 +12,8 @@ import {
   computeAssetGainSGD,
   computeFxGainSGD,
 } from "@/lib/fx";
+import { toNetPositions } from "@/lib/group-holdings";
+import { sgtDate } from "@/lib/dates";
 
 async function makeServerClient() {
   const cookieStore = await cookies();
@@ -801,11 +803,14 @@ export async function recordSnapshot(
   userId: string,
   holdings: HoldingRow[],
 ): Promise<void> {
-  const valueSgd = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  const costSgd = holdings.reduce((s, h) => s + h.costSGD, 0);
-  const fxImpactSgd = holdings.reduce((s, h) => s + h.fxGain, 0);
+  // Aggregate over NET positions (buys − sells) so a recorded sale reduces the
+  // snapshot instead of inflating it, matching every other portfolio aggregate.
+  const net = toNetPositions(holdings);
+  const valueSgd = net.reduce((s, h) => s + h.valueSGD, 0);
+  const costSgd = net.reduce((s, h) => s + h.costSGD, 0);
+  const fxImpactSgd = net.reduce((s, h) => s + h.fxGain, 0);
   const fxByCurrency: Record<string, number> = {};
-  for (const h of holdings) {
+  for (const h of net) {
     if (h.currency !== "SGD") {
       const k = h.currency.toLowerCase();
       fxByCurrency[k] = (fxByCurrency[k] ?? 0) + h.fxGain;
@@ -815,7 +820,7 @@ export async function recordSnapshot(
   await supabase.from("portfolio_snapshots").upsert(
     {
       user_id: userId,
-      recorded_date: new Date().toISOString().slice(0, 10),
+      recorded_date: sgtDate(),
       value_sgd: Math.round(valueSgd),
       cost_sgd: Math.round(costSgd),
       fx_impact_sgd: Math.round(fxImpactSgd),
