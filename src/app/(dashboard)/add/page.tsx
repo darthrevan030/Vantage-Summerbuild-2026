@@ -9,6 +9,13 @@ import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 import type { ParsedTrade } from "@/lib/pdf-parsers";
+import {
+  parseCsv,
+  parseCsvNumber,
+  CSV_FIELD_MAP,
+  csvHeaderKey,
+  type CsvRow,
+} from "@/lib/portfolio-io";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
 
@@ -68,65 +75,6 @@ function Field({
   );
 }
 
-interface CsvRow {
-  [key: string]: string;
-}
-
-// Lowercased keys — headers are normalized (trim + toLowerCase) before lookup
-// so "Units", "units", " UNITS " all resolve to the same target.
-const CSV_FIELD_MAP: Record<string, string> = {
-  "name": "name",
-  "asset name": "name",
-  "stock name": "name",
-  "ticker": "ticker",
-  "symbol": "ticker",
-  "asset type": "asset_type",
-  "type": "asset_type",
-  "strategy": "strategy",
-  "broker": "broker",
-  "units": "units",
-  "qty": "units",
-  "quantity": "units",
-  "shares": "units",
-  "no. of shares": "units",
-  "nominal": "units",
-  "currency": "currency",
-  "ccy": "currency",
-  "purchase price": "buy_price",
-  "buy price": "buy_price",
-  "price": "buy_price",
-  "avg price": "buy_price",
-  "cost basis": "buy_price",
-  "purchase date": "buy_date",
-  "date bought": "buy_date",
-  "date": "buy_date",
-  "trade date": "buy_date",
-  "fx rate": "buy_fx_rate",
-  "purchase fx rate": "buy_fx_rate",
-};
-
-const csvHeaderKey = (h: string) => h.trim().toLowerCase();
-
-function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
-  const lines = text.trim().split("\n");
-  const headers = lines[0]
-    .split(",")
-    .map((h) => h.trim().replace(/^"|"$/g, ""));
-  const rows = lines.slice(1).map((line) => {
-    const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
-  });
-  return { headers, rows };
-}
-
-// parseFloat("1,000") stops at the comma and returns 1 — a silent data-loss
-// bug when broker CSVs use thousands separators. Strip anything that isn't
-// numeric before parsing.
-function parseCsvNumber(v: string | undefined): number {
-  if (v == null) return NaN;
-  const cleaned = String(v).replace(/[^\d.\-eE+]/g, "");
-  return cleaned === "" ? NaN : parseFloat(cleaned);
-}
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
