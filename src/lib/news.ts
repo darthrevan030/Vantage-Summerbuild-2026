@@ -9,7 +9,7 @@ export const PAGE_SIZE = 5;         // headlines per page in the drawer
 
 const W_TICKER = 0.6;      // weight of a ticker hit in textRelevance
 const W_NAME = 0.4;        // weight of full name-token coverage
-// (TITLE_JACCARD lives in Task 2, next to dedupe, so Task 1 has no unused const.)
+const TITLE_JACCARD = 0.8; // title-token overlap at/above which two items are near-dupes
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export interface NewsItem {
@@ -155,4 +155,201 @@ export function buildNewsQueries(symbol: string, name?: string): string[] {
   }
 
   return queries;
+}
+
+// ── Merge pipeline types ──────────────────────────────────────────────────────
+export interface RawItem {
+  t: string;
+  src: string;
+  sent: "pos" | "neg" | "neu";
+  ago: string;
+  url: string;
+  ts: number;
+  summary: string;
+  provider: Provider;
+  providerRel?: number;
+}
+
+export type Scored = RawItem & { rel: number };
+
+// ── Dedup helpers ─────────────────────────────────────────────────────────────
+export function normalizeUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return (u.host + u.pathname).toLowerCase().replace(/\/+$/, "");
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+export function titleTokens(title: string): string[] {
+  return title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+export function jaccard(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 1;
+  const sa = new Set(a);
+  const sb = new Set(b);
+  let inter = 0;
+  for (const x of sa) if (sb.has(x)) inter++;
+  const union = new Set([...sa, ...sb]).size;
+  return union === 0 ? 0 : inter / union;
+}
+
+export function dedupe(items: Scored[]): Scored[] {
+  const out: Scored[] = [];
+  for (const it of items) {
+    const urlKey = normalizeUrl(it.url);
+    const idx = out.findIndex(
+      (o) =>
+        (urlKey.length > 0 && normalizeUrl(o.url) === urlKey) ||
+        jaccard(titleTokens(o.t), titleTokens(it.t)) >= TITLE_JACCARD,
+    );
+    if (idx === -1) {
+      out.push(it);
+      continue;
+    }
+    const better =
+      it.rel > out[idx].rel || (it.rel === out[idx].rel && it.ts > out[idx].ts);
+    if (better) out[idx] = it;
+  }
+  return out;
+}
+
+// ── Provider normalizers (parsed JSON → RawItem[]) ────────────────────────────
+export function normalizeFinnhub(news: unknown, nowMs = Date.now()): RawItem[] {
+  if (!Array.isArray(news)) return [];
+  return news
+    .slice(0, 50)
+    .map(
+      (n: {
+        headline?: string;
+        summary?: string;
+        source?: string;
+        url?: string;
+        datetime?: number;
+      }): RawItem => {
+        const headline = String(n.headline ?? "").trim();
+        const summary = String(n.summary ?? "").trim();
+        const ts = Number(n.datetime ?? 0);
+        return {
+          t: headline.slice(0, 120),
+          src: String(n.source ?? "").split(" ").slice(0, 2).join(" "),
+          sent: tag(headline),
+          ago: ago(ts, nowMs),
+          url: String(n.url ?? ""),
+          ts,
+          summary: `${headline} ${summary}`,
+          provider: "finnhub",
+        };
+      },
+    )
+    .filter((n) => n.t);
+}
+
+export function normalizeAlphaVantage(
+  feed: unknown,
+  tickerUpper: string,
+  nowMs = Date.now(),
+): RawItem[] {
+  if (!Array.isArray(feed)) return [];
+  return feed
+    .slice(0, 50)
+    .map(
+      (n: {
+        title?: string;
+        summary?: string;
+        source?: string;
+        url?: string;
+        time_published?: string;
+        overall_sentiment_label?: string;
+        ticker_sentiment?: Array<{ ticker?: string; relevance_score?: string }>;
+      }): RawItem => {
+        const headline = String(n.title ?? "").trim();
+        const summary = String(n.summary ?? "").trim();
+        const avSent = String(n.overall_sentiment_label ?? "").toLowerCase();
+        const sent: "pos" | "neg" | "neu" = avSent.includes("bullish")
+          ? "pos"
+          : avSent.includes("bearish")
+            ? "neg"
+            : tag(headline);
+        const ts = n.time_published
+          ? Math.floor(
+              new Date(
+                n.time_published.replace(
+                  /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/,
+                  "$1-$2-$3T$4:$5:$6Z",
+                ),
+              ).getTime() / 1000,
+            )
+          : 0;
+        const rels = (n.ticker_sentiment ?? [])
+          .filter((s) => String(s.ticker ?? "").toUpperCase() === tickerUpper)
+          .map((s) => parseFloat(String(s.relevance_score ?? "")))
+          .filter((v) => !Number.isNaN(v));
+        return {
+          t: headline.slice(0, 120),
+          src: String(n.source ?? "Alpha Vantage").split(" ").slice(0, 2).join(" "),
+          sent,
+          ago: ago(ts, nowMs),
+          url: String(n.url ?? ""),
+          ts,
+          summary: `${headline} ${summary}`,
+          provider: "alphavantage",
+          providerRel: rels.length ? Math.max(...rels) : undefined,
+        };
+      },
+    )
+    .filter((n) => n.t);
+}
+
+export function normalizeNewsApi(articles: unknown, nowMs = Date.now()): RawItem[] {
+  if (!Array.isArray(articles)) return [];
+  return articles
+    .slice(0, 20)
+    .map(
+      (n: {
+        title?: string;
+        description?: string;
+        source?: { name?: string };
+        url?: string;
+        publishedAt?: string;
+      }): RawItem => {
+        const headline = String(n.title ?? "").trim();
+        const description = String(n.description ?? "").trim();
+        const ts = n.publishedAt
+          ? Math.floor(new Date(n.publishedAt).getTime() / 1000)
+          : 0;
+        return {
+          t: headline.slice(0, 120),
+          src: String(n.source?.name ?? "NewsAPI").split(" ").slice(0, 2).join(" "),
+          sent: tag(headline),
+          ago: ago(ts, nowMs),
+          url: String(n.url ?? ""),
+          ts,
+          summary: `${headline} ${description}`,
+          provider: "newsapi",
+        };
+      },
+    )
+    .filter((n) => n.t);
+}
+
+// ── Merge + rank + precision filter + cap ─────────────────────────────────────
+export function mergeAndRank(
+  raw: RawItem[],
+  symbol: string,
+  name: string | undefined,
+): NewsItem[] {
+  const tokens = extractQueryTokens(symbol, name);
+  const scored: Scored[] = raw.map((it) => ({
+    ...it,
+    rel: compositeRelevance(textRelevance(it.summary, tokens), it.providerRel),
+  }));
+  return dedupe(scored)
+    .filter((it) => it.rel >= RELEVANCE_FLOOR)
+    .sort((a, b) => b.rel - a.rel || b.ts - a.ts)
+    .slice(0, MAX_ITEMS)
+    .map(({ t, src, sent, ago, url }) => ({ t, src, sent, ago, url }));
 }
