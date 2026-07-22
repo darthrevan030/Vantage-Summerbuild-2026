@@ -14,6 +14,7 @@ import {
   parseCsvNumber,
   CSV_FIELD_MAP,
   csvHeaderKey,
+  holdingsToImportCsv,
   type CsvRow,
 } from "@/lib/portfolio-io";
 
@@ -649,6 +650,37 @@ function ImportPanel() {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState("");
 
+  const downloadJsonBackup = async () => {
+    const res = await fetch("/api/holdings/backup");
+    if (!res.ok) {
+      toast.error("Export failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadCsv = async () => {
+    const res = await fetch("/api/holdings");
+    if (!res.ok) {
+      toast.error("Export failed");
+      return;
+    }
+    const holdings = await res.json();
+    const csv = holdingsToImportCsv(holdings);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-holdings.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleFile = (file: File) => {
     if (!file) return;
     const reader = new FileReader();
@@ -839,18 +871,19 @@ function ImportPanel() {
           <div className="flex gap-3 mt-5">
             <button
               className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
-              onClick={() => {
-                fetch("/api/holdings").then((r) => r.json()).then((data) => {
-                  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-                  const a = document.createElement("a"); a.href = url; a.download = "portfolio-backup.json"; a.click(); URL.revokeObjectURL(url);
-                });
-              }}>
+              onClick={downloadJsonBackup}>
               <Icon name="download" size={15} />
               Export JSON
             </button>
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadCsv}>
+              <Icon name="download" size={15} />
+              Export CSV
+            </button>
           </div>
           <div className="font-ui text-secondary text-[11px] tracking-[.04em] text-center mt-3">
-            Your data is stored in Supabase — export anytime to keep a local copy.
+            JSON is a full backup (restore on the JSON tab). CSV holds buy lots only.
           </div>
         </>
       )}
