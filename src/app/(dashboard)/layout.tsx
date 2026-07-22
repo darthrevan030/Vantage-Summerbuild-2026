@@ -24,6 +24,7 @@ import {
 } from "@/lib/portfolio";
 import { DashboardShell } from "@/components/DashboardShell";
 import { createClient } from "@/lib/supabase/server";
+import { isSnapshotStaleForDay } from "@/lib/dates";
 
 export default async function DashboardLayout({
   children,
@@ -81,6 +82,12 @@ export default async function DashboardLayout({
   const fxColors = buildFxColors(currencyCards);
   const baseFxRates = buildBaseFxRates(currencyCards);
 
+  // snapshots is sorted ascending by recorded_date (fetchSnapshots), so the
+  // last row is the most recent. Stale when there's no snapshot for today (SGT).
+  const staleToday =
+    !!user &&
+    isSnapshotStaleForDay(snapshots[snapshots.length - 1]?.recordedDate);
+
   return (
     <DashboardShell
       holdings={holdings}
@@ -102,6 +109,7 @@ export default async function DashboardLayout({
       initialRole={userSettings.role}
       initialCostBasisMethod={userSettings.costBasisMethod}
       initialTrackCash={userSettings.trackCash}
+      staleToday={staleToday}
     >
       {children}
     </DashboardShell>

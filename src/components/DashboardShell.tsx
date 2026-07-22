@@ -40,6 +40,7 @@ interface DashboardShellProps {
   initialRole: string;
   initialCostBasisMethod: CostBasisMethod;
   initialTrackCash: boolean;
+  staleToday: boolean;
   children: React.ReactNode;
 }
 
@@ -63,6 +64,7 @@ export function DashboardShell({
   initialRole,
   initialCostBasisMethod,
   initialTrackCash,
+  staleToday,
   children,
 }: DashboardShellProps) {
   const [tweaksOpen, setTweaksOpen] = useState(false);
