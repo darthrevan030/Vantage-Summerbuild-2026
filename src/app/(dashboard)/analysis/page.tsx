@@ -6,6 +6,7 @@ import { Icon } from "@/components/Icon";
 import { streamSentiment, streamAsk } from "@/lib/api/client/analyst-api";
 import { pct } from "@/lib/formatters";
 import { toNetPositions } from "@/lib/group-holdings";
+import { PAGE_SIZE } from "@/lib/news";
 import type { HoldingRow } from "@/types/holding";
 
 // shared gold button — matches the converted settings page pattern
@@ -219,7 +220,7 @@ function ScoreRail({ score }: { score: number }) {
 }
 
 // ---- SentDrawer (headlines + 30-day trend) ----
-type HlItem = { t: string; src: string; sent: string; ago: string };
+type HlItem = { t: string; src: string; sent: string; ago: string; url?: string };
 type HlState = HlItem[] | "loading" | "no-key" | "empty";
 
 const HL_CACHE: Record<string, HlItem[]> = {};
@@ -260,6 +261,7 @@ function SentDrawer({
   sparkData: number[];
 }) {
   const [hl, setHl] = useState<HlState>(HL_CACHE[id] ?? "loading");
+  const [page, setPage] = useState(0);
   const useRealPrices = sparkData.length >= 2;
   const pts = useRealPrices ? sparkToSentPath(sparkData) : sentPath(id, score);
   const delta = useRealPrices
@@ -267,6 +269,7 @@ function SentDrawer({
     : pts[pts.length - 1] - pts[0];
 
   useEffect(() => {
+    setPage(0);
     if (HL_CACHE[id]) {
       setHl(HL_CACHE[id]);
       return;
@@ -359,27 +362,70 @@ function SentDrawer({
           </div>
         )}
         {Array.isArray(hl) &&
-          hl.map((h, i) => (
-            <div
-              className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5"
-              key={i}
-            >
-              <i
-                className={
-                  "w-[7px] h-[7px] rounded-full mt-[5px] flex-[0_0_auto] " +
-                  (HL_DOT_CLS[h.sent] ?? "")
-                }
-              />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">
-                  {h.t}
-                </div>
-                <div className="text-[11px] text-muted font-mono tracking-[.02em]">
-                  {h.src} · {h.ago}
-                </div>
-              </div>
-            </div>
-          ))}
+          (() => {
+            const pageCount = Math.max(1, Math.ceil(hl.length / PAGE_SIZE));
+            const start = page * PAGE_SIZE;
+            const visible = hl.slice(start, start + PAGE_SIZE);
+            return (
+              <>
+                {visible.map((h, i) => (
+                  <div
+                    className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5"
+                    key={start + i}
+                  >
+                    <i
+                      className={
+                        "w-[7px] h-[7px] rounded-full mt-[5px] flex-[0_0_auto] " +
+                        (HL_DOT_CLS[h.sent] ?? "")
+                      }
+                    />
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">
+                        {h.url ? (
+                          <a
+                            href={h.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline"
+                          >
+                            {h.t}
+                          </a>
+                        ) : (
+                          h.t
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted font-mono tracking-[.02em]">
+                        {h.src} · {h.ago}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {hl.length > PAGE_SIZE && (
+                  <div className="flex items-center justify-between pt-[9px] border-t border-subtle">
+                    <button
+                      type="button"
+                      disabled={page === 0}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      className="font-mono text-[11px] text-secondary disabled:opacity-40 hover:text-primary transition-colors"
+                    >
+                      ← prev
+                    </button>
+                    <span className="font-mono text-[11px] text-muted tracking-[.04em]">
+                      page {page + 1} / {pageCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={page >= pageCount - 1}
+                      onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                      className="font-mono text-[11px] text-secondary disabled:opacity-40 hover:text-primary transition-colors"
+                    >
+                      next →
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
       </div>
     </div>
   );
