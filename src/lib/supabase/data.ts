@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { HoldingRow } from "@/types/holding";
 import type { UserSettings, CostBasisMethod } from "@/types/settings";
@@ -12,6 +13,8 @@ import {
   computeAssetGainSGD,
   computeFxGainSGD,
 } from "@/lib/fx";
+import { toNetPositions } from "@/lib/group-holdings";
+import { sgtDate } from "@/lib/dates";
 
 async function makeServerClient() {
   const cookieStore = await cookies();
@@ -33,7 +36,7 @@ async function makeServerClient() {
   );
 }
 
-type ServerClient = Awaited<ReturnType<typeof makeServerClient>>;
+type ServerClient = SupabaseClient;
 
 // ── Normalised DB row shapes ──────────────────────────────────────────────────
 // User data lives in `lots` + `instruments`; shared market data in `ticker_quotes`
@@ -110,6 +113,7 @@ function toHoldingRow(
     ticker: inst.symbol,
     name: inst.name,
     assetType: inst.asset_type,
+    exchangeCode: inst.exchange_code ?? null,
     broker: lot.broker,
     strategy: lot.strategy,
     units: Number(lot.quantity),
@@ -206,8 +210,11 @@ async function hydrateLot(
   );
 }
 
-export async function fetchHoldings(userId: string): Promise<HoldingRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchHoldings(
+  userId: string,
+  client?: ServerClient,
+): Promise<HoldingRow[]> {
+  const supabase = client ?? (await makeServerClient());
 
   // 1. lots + embedded instrument (single FK join)
   const { data: lotsData, error } = await supabase
@@ -533,6 +540,18 @@ export async function deleteLot(id: string, userId: string): Promise<void> {
 // are gone). Returns the number of rows removed for the confirmation toast.
 export async function deleteAllLotsForUser(userId: string): Promise<number> {
   const supabase = await makeServerClient();
+  // realized_lots.buy_lot_id is ON DELETE RESTRICT, so a buy lot referenced by a
+  // realized sale blocks `DELETE FROM lots`. Clear the user's realized rows first
+  // (RLS lets a user manage their own). Auto cash_transactions then cascade with
+  // the lots; manual cash (lot_id null) is left intact.
+  const { error: realizedError } = await supabase
+    .from("realized_lots")
+    .delete()
+    .eq("user_id", userId);
+  if (realizedError) {
+    console.error("[deleteAllLotsForUser] realized_lots", realizedError.message);
+    return 0;
+  }
   const { data, error } = await supabase
     .from("lots")
     .delete()
@@ -650,10 +669,10 @@ export async function upsertTickerHistory(
 }
 
 // Read the full daily FX history cache: { currency: { "YYYY-MM-DD": rate } }.
-export async function fetchFxRateHistory(): Promise<
-  Record<string, Record<string, number>>
-> {
-  const supabase = await makeServerClient();
+export async function fetchFxRateHistory(
+  client?: ServerClient,
+): Promise<Record<string, Record<string, number>>> {
+  const supabase = client ?? (await makeServerClient());
   const { data } = await supabase.from("fx_history").select("currency, rates");
   const out: Record<string, Record<string, number>> = {};
   for (const r of (data ?? []) as {
@@ -760,8 +779,11 @@ export interface SnapshotRow {
 // snapshot history comes through regardless of that cap or how many rows accrue.
 const SNAPSHOT_PAGE = 1000;
 
-export async function fetchSnapshots(userId: string): Promise<SnapshotRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchSnapshots(
+  userId: string,
+  client?: ServerClient,
+): Promise<SnapshotRow[]> {
+  const supabase = client ?? (await makeServerClient());
   const rows: SnapshotRow[] = [];
 
   for (let from = 0; ; from += SNAPSHOT_PAGE) {
@@ -801,11 +823,14 @@ export async function recordSnapshot(
   userId: string,
   holdings: HoldingRow[],
 ): Promise<void> {
-  const valueSgd = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  const costSgd = holdings.reduce((s, h) => s + h.costSGD, 0);
-  const fxImpactSgd = holdings.reduce((s, h) => s + h.fxGain, 0);
+  // Aggregate over NET positions (buys − sells) so a recorded sale reduces the
+  // snapshot instead of inflating it, matching every other portfolio aggregate.
+  const net = toNetPositions(holdings);
+  const valueSgd = net.reduce((s, h) => s + h.valueSGD, 0);
+  const costSgd = net.reduce((s, h) => s + h.costSGD, 0);
+  const fxImpactSgd = net.reduce((s, h) => s + h.fxGain, 0);
   const fxByCurrency: Record<string, number> = {};
-  for (const h of holdings) {
+  for (const h of net) {
     if (h.currency !== "SGD") {
       const k = h.currency.toLowerCase();
       fxByCurrency[k] = (fxByCurrency[k] ?? 0) + h.fxGain;
@@ -815,7 +840,7 @@ export async function recordSnapshot(
   await supabase.from("portfolio_snapshots").upsert(
     {
       user_id: userId,
-      recorded_date: new Date().toISOString().slice(0, 10),
+      recorded_date: sgtDate(),
       value_sgd: Math.round(valueSgd),
       cost_sgd: Math.round(costSgd),
       fx_impact_sgd: Math.round(fxImpactSgd),
@@ -1346,4 +1371,27 @@ export async function insertLegacyCashSeed(
     note: "legacy seed from cost basis",
   });
   if (error) console.error("[insertLegacyCashSeed]", error.message);
+}
+
+// Distinct user ids that hold at least one lot — the cron's work-list. Uses the
+// admin client so RLS doesn't hide other users' lots. Paged past the 1000-row cap.
+export async function fetchActiveUserIds(): Promise<string[]> {
+  const admin = createAdminClient();
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  for (let fromRow = 0; ; fromRow += PAGE) {
+    const { data, error } = await admin
+      .from("lots")
+      .select("user_id")
+      .order("user_id", { ascending: true })
+      .range(fromRow, fromRow + PAGE - 1);
+    if (error) {
+      console.error("[fetchActiveUserIds]", error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data) ids.add(r.user_id as string);
+    if (data.length < PAGE) break;
+  }
+  return [...ids];
 }

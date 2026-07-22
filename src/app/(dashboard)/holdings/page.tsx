@@ -20,6 +20,7 @@ import { refreshHoldingPrices } from "@/lib/api-client";
 import type { HoldingRow, GroupedHolding, AssetType } from "@/types/holding";
 import { FIXED_INCOME_TYPES } from "@/types/holding";
 import { groupHoldings } from "@/lib/group-holdings";
+import { toCsv } from "@/lib/portfolio-io";
 import type { OpenBuyLot } from "@/lib/realized";
 import type { CostBasisMethod } from "@/types/settings";
 
@@ -1153,7 +1154,7 @@ export default function HoldingsPage() {
       h.fxGain.toFixed(2),
       h.totalPct.toFixed(2),
     ]);
-    const csv = [cols, ...rowData].map((r) => r.join(",")).join("\n");
+    const csv = toCsv([cols, ...rowData]);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;

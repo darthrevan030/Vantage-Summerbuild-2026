@@ -36,6 +36,7 @@ function makeRow(overrides: Partial<HoldingRow> = {}): HoldingRow {
     currency: "USD",
     flag: "🇺🇸",
     icon: "briefcase",
+    exchangeCode: null,
     buyPrice: 100,
     buyDate: "2026-01-01",
     buyFxRate: 1.3,

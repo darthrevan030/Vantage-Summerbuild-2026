@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
+import { DailyAutoRefresh } from "@/components/DailyAutoRefresh";
 import { NerveBar } from "@/components/NerveBar";
 import { TabBar } from "@/components/TabBar";
 import { SummaryRail } from "@/components/SummaryRail";
@@ -40,6 +41,7 @@ interface DashboardShellProps {
   initialRole: string;
   initialCostBasisMethod: CostBasisMethod;
   initialTrackCash: boolean;
+  staleToday: boolean;
   children: React.ReactNode;
 }
 
@@ -63,6 +65,7 @@ export function DashboardShell({
   initialRole,
   initialCostBasisMethod,
   initialTrackCash,
+  staleToday,
   children,
 }: DashboardShellProps) {
   const [tweaksOpen, setTweaksOpen] = useState(false);
@@ -95,6 +98,7 @@ export function DashboardShell({
       }}
     >
       <div className="flex min-h-screen flex-col">
+        <DailyAutoRefresh trigger={staleToday} />
         <NerveBar
           hero={hero}
           animate
