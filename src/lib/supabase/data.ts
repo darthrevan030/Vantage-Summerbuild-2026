@@ -536,6 +536,18 @@ export async function deleteLot(id: string, userId: string): Promise<void> {
 // are gone). Returns the number of rows removed for the confirmation toast.
 export async function deleteAllLotsForUser(userId: string): Promise<number> {
   const supabase = await makeServerClient();
+  // realized_lots.buy_lot_id is ON DELETE RESTRICT, so a buy lot referenced by a
+  // realized sale blocks `DELETE FROM lots`. Clear the user's realized rows first
+  // (RLS lets a user manage their own). Auto cash_transactions then cascade with
+  // the lots; manual cash (lot_id null) is left intact.
+  const { error: realizedError } = await supabase
+    .from("realized_lots")
+    .delete()
+    .eq("user_id", userId);
+  if (realizedError) {
+    console.error("[deleteAllLotsForUser] realized_lots", realizedError.message);
+    return 0;
+  }
   const { data, error } = await supabase
     .from("lots")
     .delete()

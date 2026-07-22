@@ -8,6 +8,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 //   - audit_log is the accountability trail — preserved; the deletion is logged.
 //   - holdings_backup_* is an out-of-band snapshot — left alone.
 const USER_SCOPED_TABLES = [
+  // realized_lots MUST precede lots: realized_lots.buy_lot_id → lots is
+  // ON DELETE RESTRICT, so deleting lots first is blocked for any account that
+  // has recorded a sale. (These rows are also the user's own data to purge.)
+  "realized_lots",
   "lots",
   "holding_overrides",
   "portfolio_snapshots",
