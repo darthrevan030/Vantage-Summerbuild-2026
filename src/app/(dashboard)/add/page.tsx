@@ -15,7 +15,9 @@ import {
   CSV_FIELD_MAP,
   csvHeaderKey,
   holdingsToImportCsv,
+  parseBackup,
   type CsvRow,
+  type BackupEnvelope,
 } from "@/lib/portfolio-io";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
@@ -642,7 +644,7 @@ function ManualForm() {
 function ImportPanel() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [importMode, setImportMode] = useState<"csv" | "pdf">("csv");
+  const [importMode, setImportMode] = useState<"csv" | "json" | "pdf">("csv");
   const [drag, setDrag] = useState(false);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<CsvRow[]>([]);
@@ -680,6 +682,63 @@ function ImportPanel() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const jsonFileRef = useRef<HTMLInputElement>(null);
+  const [jsonEnv, setJsonEnv] = useState<BackupEnvelope | null>(null);
+  const [restoreMode, setRestoreMode] = useState<"append" | "replace">("append");
+  const [replaceConfirm, setReplaceConfirm] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState("");
+
+  const handleJsonFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const env = parseBackup((e.target?.result as string) ?? "");
+        setJsonEnv(env);
+        setRestoreResult("");
+      } catch (err) {
+        setJsonEnv(null);
+        toast.error(err instanceof Error ? err.message : "Invalid backup file");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleRestore = async () => {
+    if (!jsonEnv) return;
+    if (restoreMode === "replace" && replaceConfirm !== "REPLACE") return;
+    setRestoring(true);
+    setRestoreResult("");
+    try {
+      const res = await fetch("/api/holdings/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ envelope: jsonEnv, mode: restoreMode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Restore failed");
+        setRestoring(false);
+        return;
+      }
+      const summary = `Restored ${data.restored}${data.failed ? ` · ${data.failed} failed` : ""}.`;
+      setRestoreResult(summary);
+      if (data.failed) toast.warning(summary);
+      else toast.success(summary);
+      router.refresh();
+    } catch {
+      toast.error("Restore failed");
+    }
+    setRestoring(false);
+  };
+
+  const jsonCounts = jsonEnv
+    ? {
+        buys: jsonEnv.lots.filter((l) => l.transactionType !== "sell").length,
+        sells: jsonEnv.lots.filter((l) => l.transactionType === "sell").length,
+      }
+    : null;
 
   const handleFile = (file: File) => {
     if (!file) return;
@@ -809,7 +868,7 @@ function ImportPanel() {
       <div className="flex items-center justify-between mb-4 max-bp600:flex-wrap max-bp600:gap-2">
         <span className="text-[13px] font-semibold text-primary tracking-[.01em]">Import &amp; Backup</span>
         <div className="flex gap-1.5">
-          {(["csv", "pdf"] as const).map((mode) => (
+          {(["csv", "json", "pdf"] as const).map((mode) => (
             <button key={mode}
               className={"cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] uppercase tracking-[.06em] transition-all duration-150 " + (importMode === mode ? "border-gold-soft bg-wash text-gold" : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")}
               onClick={() => setImportMode(mode)}>
@@ -884,6 +943,71 @@ function ImportPanel() {
           </div>
           <div className="font-ui text-secondary text-[11px] tracking-[.04em] text-center mt-3">
             JSON is a full backup (restore on the JSON tab). CSV holds buy lots only.
+          </div>
+        </>
+      )}
+
+      {importMode === "json" && (
+        <>
+          <input ref={jsonFileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+            onChange={(e) => { if (e.target.files?.[0]) handleJsonFile(e.target.files[0]); }} />
+          <div
+            className="flex flex-col items-center gap-[7px] text-center border-[1.5px] border-dashed rounded-[13px] cursor-pointer px-5 py-[30px] bg-surface border-gold-soft hover:bg-elevated hover:border-gold [transition:background_.2s,border-color_.2s]"
+            onClick={() => jsonFileRef.current?.click()}>
+            <Icon name="upload" size={26} style={{ color: "var(--gold)" }} />
+            <div className="font-ui text-[14px] font-semibold mt-1">Drop a portfolio-backup.json</div>
+            <div className="font-ui text-secondary">or click to browse</div>
+            <div className="font-ui text-secondary text-[11px] tracking-[.04em] mt-2">Full restore — buys, sells &amp; realized P&amp;L</div>
+          </div>
+
+          {jsonEnv && jsonCounts && (
+            <div className="mt-[18px] flex flex-col gap-3">
+              <div className="font-ui text-[13px] text-primary">
+                {jsonCounts.buys} buy{jsonCounts.buys !== 1 ? "s" : ""}, {jsonCounts.sells} sell{jsonCounts.sells !== 1 ? "s" : ""} in this backup.
+              </div>
+              <div className="flex gap-1.5">
+                {(["append", "replace"] as const).map((m) => (
+                  <button key={m}
+                    className={"cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] uppercase tracking-[.06em] transition-all duration-150 " + (restoreMode === m ? "border-gold-soft bg-wash text-gold" : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")}
+                    onClick={() => setRestoreMode(m)}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="font-ui text-secondary text-[11.5px]">
+                {restoreMode === "append"
+                  ? "Adds these lots on top of your current holdings (may duplicate)."
+                  : "Deletes all current holdings first, then restores this backup."}
+              </div>
+              {restoreMode === "replace" && (
+                <input type="text" value={replaceConfirm} onChange={(e) => setReplaceConfirm(e.target.value)}
+                  placeholder="Type REPLACE to confirm"
+                  className="rounded-[9px] border border-subtle bg-surface px-3 py-2 font-ui text-[13px] text-primary outline-none focus:border-gold-soft" />
+              )}
+              {restoreResult && <div className="font-ui text-[12.5px]" style={{ color: "var(--gain)" }}>{restoreResult}</div>}
+              <button
+                className="flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+                onClick={handleRestore}
+                disabled={restoring || (restoreMode === "replace" && replaceConfirm !== "REPLACE")}>
+                <Icon name="upload" size={15} />
+                {restoring ? "Restoring…" : restoreMode === "replace" ? "Replace & restore" : "Restore"}
+              </button>
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-5">
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadJsonBackup}>
+              <Icon name="download" size={15} />
+              Export JSON
+            </button>
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadCsv}>
+              <Icon name="download" size={15} />
+              Export CSV
+            </button>
           </div>
         </>
       )}
