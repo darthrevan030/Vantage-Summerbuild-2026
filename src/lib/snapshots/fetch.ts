@@ -1,3 +1,4 @@
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { getProviderFlags } from "@/lib/supabase/app-config";
 import { fetchDailyCloses } from "@/lib/providers/history";
 import { fetchFxRateHistory, upsertFxHistory } from "@/lib/supabase/data";
@@ -118,13 +119,14 @@ export async function fetchWindowFx(params: {
   from: string;
   to: string;
   providers: ProviderFlags;
+  client?: SupabaseClient;
 }): Promise<Record<string, Record<string, number>>> {
-  const { currencies, from, to, providers } = params;
+  const { currencies, from, to, providers, client } = params;
   const foreign = currencies.filter((c) => c !== "SGD");
   const fxByCcy: Record<string, Record<string, number>> = {};
   if (foreign.length === 0 || !providers.frankfurter) return fxByCcy;
 
-  const fxCache = await fetchFxRateHistory();
+  const fxCache = await fetchFxRateHistory(client);
   for (const ccy of foreign) fxByCcy[ccy] = { ...(fxCache[ccy] ?? {}) };
 
   let fetchFrom = to; // always refresh `to` (its rate is still "live")

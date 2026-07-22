@@ -25,11 +25,15 @@ async function handler(req: Request) {
   // bypasses RLS so reads see real data.
   const admin = createAdminClient();
 
-  const today = sgtDate();
+  const LOOKBACK_DAYS = 10;
+  // Value only through the last completed SGT day. Today is deliberately left to
+  // the visit-time refresh (DailyAutoRefresh) so the cron doesn't pre-empt it and
+  // so we never value an untraded "today" at cost basis.
+  const end = prevDay(sgtDate());
+
   const userIds = await fetchActiveUserIds();
   if (userIds.length === 0) return NextResponse.json({ users: 0, rows: 0 });
 
-  // Per user: holdings + their missing-day window start.
   const perUser = await Promise.all(
     userIds.map(async (id) => {
       const holdings = await fetchHoldings(id, admin);
@@ -40,19 +44,22 @@ async function handler(req: Request) {
         holdings[0].buyDate,
       );
       const lastSnap = snaps.length ? snaps[snaps.length - 1].recordedDate : null;
-      const start = lastSnap ? nextDay(lastSnap) : earliest;
-      return { id, holdings, start: start > today ? null : start };
+      const writeStart = lastSnap ? nextDay(lastSnap) : earliest;
+      if (writeStart > end) return null; // already current through the last completed day
+      // Fill-forward window reaches back far enough to catch a real close before
+      // writeStart, but never before the first lot (where buyPrice is the right seed).
+      const fillStart = maxDate(earliest, minusDays(writeStart, LOOKBACK_DAYS));
+      return { id, holdings, fillStart, writeStart };
     }),
   );
   const active = perUser.filter(
-    (u): u is NonNullable<typeof u> => u !== null && u.start !== null,
+    (u): u is NonNullable<typeof u> => u !== null,
   );
   if (active.length === 0) return NextResponse.json({ users: 0, rows: 0 });
 
-  // Global window = earliest per-user start … today; fetch each instrument once.
   const globalFrom = active.reduce(
-    (min, u) => (u.start! < min ? u.start! : min),
-    today,
+    (min, u) => (u.fillStart < min ? u.fillStart : min),
+    end,
   );
   const allHoldings = active.flatMap((u) => u.holdings);
   const tickers = [
@@ -71,13 +78,14 @@ async function handler(req: Request) {
 
   const providers = await getProviderFlags();
   const [rawPrices, rawFx] = await Promise.all([
-    fetchWindowPrices({ tickers, tickerCurrency, from: globalFrom, to: today, providers }),
-    fetchWindowFx({ currencies, from: globalFrom, to: today, providers }),
+    fetchWindowPrices({ tickers, tickerCurrency, from: globalFrom, to: end, providers }),
+    fetchWindowFx({ currencies, from: globalFrom, to: end, providers, client: admin }),
   ]);
 
   let totalRows = 0;
   for (const u of active) {
-    const dates = dateRange(u.start!, today);
+    const dates = dateRange(u.fillStart, end);
+    const writeDates = dateRange(u.writeStart, end);
     const priceFallback = (ticker: string) =>
       u.holdings.find((h) => h.ticker === ticker)?.buyPrice ?? 0;
     const fxFallback = (ccy: string) =>
@@ -86,6 +94,7 @@ async function handler(req: Request) {
       userId: u.id,
       lots: u.holdings,
       dates,
+      writeDates,
       rawPrices,
       rawFx,
       priceFallback,
@@ -115,4 +124,18 @@ function nextDay(date: string): string {
   const d = new Date(date + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+function minusDays(date: string, n: number): string {
+  const d = new Date(date + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function prevDay(date: string): string {
+  return minusDays(date, 1);
+}
+
+function maxDate(a: string, b: string): string {
+  return a >= b ? a : b;
 }

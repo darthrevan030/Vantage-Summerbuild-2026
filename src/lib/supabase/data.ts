@@ -669,10 +669,10 @@ export async function upsertTickerHistory(
 }
 
 // Read the full daily FX history cache: { currency: { "YYYY-MM-DD": rate } }.
-export async function fetchFxRateHistory(): Promise<
-  Record<string, Record<string, number>>
-> {
-  const supabase = await makeServerClient();
+export async function fetchFxRateHistory(
+  client?: ServerClient,
+): Promise<Record<string, Record<string, number>>> {
+  const supabase = client ?? (await makeServerClient());
   const { data } = await supabase.from("fx_history").select("currency, rates");
   const out: Record<string, Record<string, number>> = {};
   for (const r of (data ?? []) as {

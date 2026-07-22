@@ -119,4 +119,26 @@ describe("buildSnapshotRows", () => {
     // 01-03: price 101, FX still 1.35 → 409.05 → rounds to 409
     expect(rows[2].value_sgd).toBe(409);
   });
+
+  it("fills forward from a real close before the write window, not the buyPrice seed", () => {
+    // Fill window spans 01-01..01-05 and contains a real close on 01-02 (100).
+    // The write window starts AFTER that close (01-04..01-05), which have no bars.
+    // Regression (the #1 bug) would seed from buyPrice (50) → value 500, not 1000.
+    const lots = [
+      lot({ id: "a", ticker: "AAA", units: 10, buyPrice: 50, buyDate: "2026-01-01", currency: "SGD" }),
+    ];
+    const rows = buildSnapshotRows({
+      userId: "u1",
+      lots,
+      dates: dateRange("2026-01-01", "2026-01-05"),
+      writeDates: ["2026-01-04", "2026-01-05"],
+      rawPrices: { AAA: { "2026-01-02": 100 } },
+      rawFx: {},
+      priceFallback: () => 50, // buyPrice seed — must NOT be used for the written dates
+      fxFallback: () => 1,
+    });
+    expect(rows.map((r) => r.recorded_date)).toEqual(["2026-01-04", "2026-01-05"]);
+    expect(rows[0].value_sgd).toBe(1000); // 10 x 100 (carried forward from 01-02)
+    expect(rows[1].value_sgd).toBe(1000);
+  });
 });

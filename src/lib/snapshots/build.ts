@@ -43,12 +43,13 @@ export function buildSnapshotRows(params: {
   userId: string;
   lots: LotLite[];
   dates: string[];
+  writeDates?: string[]; // subset of `dates` to emit as rows; default = all dates
   rawPrices: Record<string, Record<string, number>>;
   rawFx: Record<string, Record<string, number>>;
   priceFallback: (ticker: string) => number;
   fxFallback: (ccy: string) => number;
 }): SnapshotRowOut[] {
-  const { userId, lots, dates, rawPrices, rawFx, priceFallback, fxFallback } =
+  const { userId, lots, dates, writeDates, rawPrices, rawFx, priceFallback, fxFallback } =
     params;
 
   const tickers = [
@@ -71,8 +72,10 @@ export function buildSnapshotRows(params: {
     prices[ticker]?.[date] ?? priceFallback(ticker);
   const fxOf = (ccy: string, date: string) => fx[ccy]?.[date] ?? fxFallback(ccy);
 
+  const emit = writeDates ? new Set(writeDates) : null;
   const rows: SnapshotRowOut[] = [];
   for (const date of dates) {
+    if (emit && !emit.has(date)) continue;
     const agg = computeSnapshotAsOf(lots, date, priceOf, fxOf);
     rows.push({
       user_id: userId,
