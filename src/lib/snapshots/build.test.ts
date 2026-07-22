@@ -85,4 +85,38 @@ describe("buildSnapshotRows", () => {
     expect(rows[0].value_sgd).toBe(1000); // held
     expect(rows[2].value_sgd).toBe(0); // fully sold
   });
+
+  it("fill-forwards a sparse FX series and rounds fractional SGD values", () => {
+    // One USD lot; the FX series is sparse (only the first date), so 01-02 and
+    // 01-03 must fill-forward the last known rate. On 01-03 the price ticks to
+    // 101, yielding 3 x 101 x 1.35 = 409.05, which must round to 409.
+    const lots = [
+      lot({
+        id: "u1",
+        ticker: "USX",
+        units: 3,
+        buyPrice: 100,
+        buyFxRate: 1.3,
+        currency: "USD",
+        buyDate: "2026-01-01",
+      }),
+    ];
+    const rows = buildSnapshotRows({
+      userId: "u1",
+      lots,
+      dates: dateRange("2026-01-01", "2026-01-03"),
+      rawPrices: { USX: { "2026-01-01": 100, "2026-01-03": 101 } },
+      rawFx: { USD: { "2026-01-01": 1.35 } }, // sparse: 01-02 & 01-03 fill forward
+      priceFallback: () => 100,
+      fxFallback: () => 1.3,
+    });
+    // 01-01: 3 x 100 x 1.35 = 405
+    expect(rows[0].value_sgd).toBe(405);
+    expect(rows[0].cost_sgd).toBe(390); // 3 x 100 x 1.3
+    expect(rows[0].fx_by_currency.usd).toBeCloseTo(15, 6); // 3 x 100 x (1.35 - 1.3)
+    // 01-02: price + FX both fill-forward → still 405
+    expect(rows[1].value_sgd).toBe(405);
+    // 01-03: price 101, FX still 1.35 → 409.05 → rounds to 409
+    expect(rows[2].value_sgd).toBe(409);
+  });
 });
