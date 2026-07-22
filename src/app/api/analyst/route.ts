@@ -161,8 +161,11 @@ function buildSentiment(assets: SentimentAsset[]) {
       .join("\n") +
     "\n</holdings>";
 
-  // ~70 output tokens per item + headroom for overall
-  const maxTokens = Math.min(4096, 300 + assets.length * 90);
+  // Budget generously: models don't always honor the word caps, and non-Claude
+  // models (via OpenRouter) tokenize more and are wordier, so an undersized cap
+  // truncates the JSON mid-array and the entire response is discarded. Allow
+  // ~160 output tokens per item plus headroom for the overall block.
+  const maxTokens = Math.min(8192, 512 + assets.length * 160);
   return { system, user, maxTokens };
 }
 
