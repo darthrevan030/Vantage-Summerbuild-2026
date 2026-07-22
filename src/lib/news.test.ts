@@ -134,7 +134,7 @@ function scored(overrides: Partial<Scored> = {}): Scored {
 }
 
 describe("normalizeUrl", () => {
-  it("lowercases host+path, strips trailing slash and query", () => {
+  it("lowercases host+path, strips trailing slash and tracking query", () => {
     expect(normalizeUrl("https://Reuters.com/Article/123?utm_source=x")).toBe(
       "reuters.com/article/123",
     );
@@ -144,6 +144,38 @@ describe("normalizeUrl", () => {
   });
   it("returns empty string for empty input", () => {
     expect(normalizeUrl("")).toBe("");
+  });
+  it("keeps identity query params so query-only URLs stay distinct", () => {
+    // Finnhub URLs share one host+path and differ ONLY in ?id= — stripping the
+    // whole query used to collapse every Finnhub article into one.
+    expect(normalizeUrl("https://finnhub.io/api/news?id=abc")).toBe(
+      "finnhub.io/api/news?id=abc",
+    );
+    expect(normalizeUrl("https://finnhub.io/api/news?id=abc")).not.toBe(
+      normalizeUrl("https://finnhub.io/api/news?id=xyz"),
+    );
+  });
+});
+
+describe("dedupe with query-identity URLs", () => {
+  it("does not collapse distinct Finnhub articles that differ only by ?id=", () => {
+    const mk = (id: string, t: string): Scored => ({
+      t,
+      src: "Finnhub",
+      sent: "neu",
+      ago: "1h",
+      url: `https://finnhub.io/api/news?id=${id}`,
+      ts: Number(id),
+      summary: t,
+      provider: "finnhub",
+      rel: 0.5,
+    });
+    const out = dedupe([
+      mk("1", "Apple beats earnings"),
+      mk("2", "Apple unveils new chip"),
+      mk("3", "Apple faces antitrust suit"),
+    ]);
+    expect(out).toHaveLength(3);
   });
 });
 

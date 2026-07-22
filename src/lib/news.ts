@@ -180,11 +180,29 @@ export interface RawItem {
 export type Scored = RawItem & { rel: number };
 
 // ── Dedup helpers ─────────────────────────────────────────────────────────────
+// Query params that only ever carry tracking/attribution, never article identity.
+const TRACKING_KEYS = new Set([
+  "utm", "fbclid", "gclid", "dclid", "gbraid", "wbraid", "msclkid",
+  "mc_cid", "mc_eid", "igshid", "__twitter_impression", "_hsenc", "_hsmi",
+]);
+
+function isTrackingParam(key: string): boolean {
+  const k = key.toLowerCase();
+  return k.startsWith("utm_") || TRACKING_KEYS.has(k);
+}
+
 export function normalizeUrl(url: string): string {
   if (!url) return "";
   try {
     const u = new URL(url);
-    return (u.host + u.pathname).toLowerCase().replace(/\/+$/, "");
+    // Keep identity-bearing query params (e.g. Finnhub's ?id=…, whose URLs share
+    // one host+path and differ ONLY in the query) — dropping the whole query
+    // would collapse every such article to a single key. Strip only trackers.
+    const kept = [...u.searchParams].filter(([k]) => !isTrackingParam(k));
+    kept.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const base = (u.host + u.pathname).toLowerCase().replace(/\/+$/, "");
+    const qs = kept.map(([k, v]) => `${k}=${v}`).join("&");
+    return qs ? `${base}?${qs}` : base;
   } catch {
     return url.toLowerCase();
   }
