@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
+import { DailyAutoRefresh } from "@/components/DailyAutoRefresh";
 import { NerveBar } from "@/components/NerveBar";
 import { TabBar } from "@/components/TabBar";
 import { SummaryRail } from "@/components/SummaryRail";
@@ -97,6 +98,7 @@ export function DashboardShell({
       }}
     >
       <div className="flex min-h-screen flex-col">
+        <DailyAutoRefresh trigger={staleToday} />
         <NerveBar
           hero={hero}
           animate
