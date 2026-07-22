@@ -112,6 +112,7 @@ function toHoldingRow(
     ticker: inst.symbol,
     name: inst.name,
     assetType: inst.asset_type,
+    exchangeCode: inst.exchange_code ?? null,
     broker: lot.broker,
     strategy: lot.strategy,
     units: Number(lot.quantity),

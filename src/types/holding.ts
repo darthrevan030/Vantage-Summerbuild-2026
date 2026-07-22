@@ -26,6 +26,7 @@ export interface Holding {
   currency: string;
   flag: string;
   icon: string;
+  exchangeCode: string | null;
   buyPrice: number;
   buyDate: string;
   buyFxRate: number;
