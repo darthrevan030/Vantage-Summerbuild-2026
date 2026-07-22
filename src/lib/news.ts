@@ -9,6 +9,7 @@ export const PAGE_SIZE = 5;         // headlines per page in the drawer
 
 const W_TICKER = 0.6;      // weight of a ticker hit in textRelevance
 const W_NAME = 0.4;        // weight of full name-token coverage
+const W_PHRASE = 0.8;      // score when a recognized index phrase (e.g. "S&P 500") matches
 const TITLE_JACCARD = 0.8; // title-token overlap at/above which two items are near-dupes
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -25,6 +26,39 @@ export type Provider = "finnhub" | "alphavantage" | "newsapi";
 export interface QueryTokens {
   ticker: string;
   nameTokens: string[];
+  // Compact, separator-free index phrase (e.g. "sp500") when the holding tracks a
+  // recognized index. Matched against the separator-stripped headline so "S&P 500"
+  // hits but "25,500" does not.
+  phrase?: string;
+}
+
+// Index families we recognize in fund names. First match wins. `query` is the
+// canonical NewsAPI phrase; `phrase` is the separator-free form matched in headlines.
+interface IndexInfo {
+  query: string;
+  phrase: string;
+}
+
+const INDEX_PATTERNS: Array<{ re: RegExp; info: IndexInfo }> = [
+  { re: /\b(?:s\s*&?\s*p|sp)\s*500\b/i,        info: { query: '"S&P 500"', phrase: "sp500" } },
+  { re: /\bnasdaq\s*100\b/i,                   info: { query: '"Nasdaq 100"', phrase: "nasdaq100" } },
+  { re: /\bftse\s*all[\s-]*world\b/i,          info: { query: '"FTSE All-World"', phrase: "ftseallworld" } },
+  { re: /\bftse\s*all[\s-]*share\b/i,          info: { query: '"FTSE All-Share"', phrase: "ftseallshare" } },
+  { re: /\bftse\s*250\b/i,                     info: { query: '"FTSE 250"', phrase: "ftse250" } },
+  { re: /\bftse\s*100\b/i,                     info: { query: '"FTSE 100"', phrase: "ftse100" } },
+  { re: /\brussell\s*2000\b/i,                 info: { query: '"Russell 2000"', phrase: "russell2000" } },
+  { re: /\bmsci\s*world\b/i,                   info: { query: '"MSCI World"', phrase: "msciworld" } },
+  { re: /\bmsci\s*(?:emerging|em)\b/i,         info: { query: '"MSCI Emerging Markets"', phrase: "msciemerging" } },
+  { re: /\b(?:euro\s*)?stoxx\s*(?:600|50)\b/i, info: { query: '"Euro Stoxx"', phrase: "stoxx" } },
+  { re: /\bnikkei\s*225\b/i,                   info: { query: '"Nikkei 225"', phrase: "nikkei" } },
+  { re: /\bhang\s*seng\b/i,                    info: { query: '"Hang Seng"', phrase: "hangseng" } },
+  { re: /\bstraits\s*times\b/i,                info: { query: '"Straits Times Index"', phrase: "straitstimes" } },
+];
+
+export function detectIndex(name?: string): IndexInfo | null {
+  if (!name) return null;
+  for (const { re, info } of INDEX_PATTERNS) if (re.test(name)) return info;
+  return null;
 }
 
 // ── Sentiment + relative time ─────────────────────────────────────────────────
@@ -102,7 +136,7 @@ export function extractQueryTokens(symbol: string, name?: string): QueryTokens {
     // index number is too generic and matches unrelated figures in headlines
     // (e.g. "500" hitting "25,500 crore"). Distinctive tokens like "ftse" stay.
     .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
-  return { ticker, nameTokens };
+  return { ticker, nameTokens, phrase: detectIndex(name)?.phrase };
 }
 
 export function textRelevance(text: string, tokens: QueryTokens): number {
@@ -117,7 +151,13 @@ export function textRelevance(text: string, tokens: QueryTokens): number {
   // clear the floor, so a broad ETF surfaces no news at all.
   const nameDenom = Math.min(tokens.nameTokens.length, 2);
   const nameCoverage = nameDenom > 0 ? Math.min(1, nameHits / nameDenom) : 0;
-  const score = (tickerHit ? W_TICKER : 0) + W_NAME * nameCoverage;
+  let score = (tickerHit ? W_TICKER : 0) + W_NAME * nameCoverage;
+  // Recognized index phrase ("sp500" from "S&P 500") matched against the
+  // separator-stripped headline — a strong, precise signal for index funds whose
+  // ticker/name don't otherwise appear in headlines ("S&P 500" hits, "25,500" doesn't).
+  if (tokens.phrase && hay.replace(/[^a-z0-9]+/g, "").includes(tokens.phrase)) {
+    score = Math.max(score, W_PHRASE);
+  }
   return Math.min(1, Math.max(0, score));
 }
 
@@ -130,6 +170,11 @@ export function buildNewsQueries(symbol: string, name?: string): string[] {
   const ticker = baseTicker(symbol).toUpperCase();
   const queries: string[] = [];
   const fin = "stock OR shares OR earnings OR investor";
+
+  // Index funds: query the canonical index name first (e.g. "S&P 500"), since the
+  // fund's own name ("SP 500") and ticker rarely appear in market headlines.
+  const idx = detectIndex(name);
+  if (idx) queries.push(idx.query);
 
   if (name && name.trim().length > 0) {
     const isEtf = /\bETF\b|\bFund\b|\bUCITS\b/i.test(name);

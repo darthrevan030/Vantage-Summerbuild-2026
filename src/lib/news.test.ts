@@ -102,9 +102,10 @@ describe("compositeRelevance", () => {
 });
 
 describe("buildNewsQueries", () => {
-  it("builds an ETF family query for fund names", () => {
+  it("builds an index query first for index ETFs, then family queries", () => {
     const q = buildNewsQueries("VWRA.LSE", "Vanguard FTSE All-World UCITS ETF");
-    expect(q[0]).toBe('"Vanguard" ETF');
+    expect(q[0]).toBe('"FTSE All-World"');
+    expect(q).toContain('"Vanguard" ETF');
     expect(q).toContain('"VWRA" ETF');
   });
   it("builds a stripped-name + finance-context query for equities", () => {
@@ -154,6 +155,31 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("https://finnhub.io/api/news?id=abc")).not.toBe(
       normalizeUrl("https://finnhub.io/api/news?id=xyz"),
     );
+  });
+});
+
+describe("index-fund handling", () => {
+  it("detects the index and exposes a compact phrase token", () => {
+    expect(extractQueryTokens("CSPX.LSE", "SP 500").phrase).toBe("sp500");
+    expect(
+      extractQueryTokens("VWRA.LSE", "Vanguard FTSE All-World UCITS ETF").phrase,
+    ).toBe("ftseallworld");
+    expect(extractQueryTokens("D05.SG", "DBS Group").phrase).toBeUndefined();
+  });
+
+  it("queries the canonical index name first", () => {
+    expect(buildNewsQueries("CSPX.LSE", "SP 500")[0]).toBe('"S&P 500"');
+    expect(buildNewsQueries("ISF.LSE", "iShares FTSE 100")[0]).toBe('"FTSE 100"');
+  });
+
+  it("matches an index phrase in a headline but not a lookalike number", () => {
+    const t = extractQueryTokens("CSPX.LSE", "SP 500");
+    expect(
+      textRelevance("This overlooked index beats the S&P 500 over ten years", t),
+    ).toBeGreaterThanOrEqual(RELEVANCE_FLOOR);
+    expect(
+      textRelevance("Shapoorji Pallonji kicks off Rs 25,500 crore refinancing", t),
+    ).toBe(0);
   });
 });
 

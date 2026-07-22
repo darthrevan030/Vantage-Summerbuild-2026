@@ -195,7 +195,11 @@ export async function GET(req: NextRequest) {
     await getProviderFlags();
   const keys: Keys = {
     finnhub: clean(process.env.FINNHUB_API_KEY),
-    alpha: alphaEnabled ? clean(process.env.ALPHA_VANTAGE_KEY) : undefined,
+    // Accept either env name — ALPHA_VANTAGE_KEY (route convention) or
+    // ALPHAVANTAGE_API_KEY (matches the *_API_KEY pattern of the other providers).
+    alpha: alphaEnabled
+      ? clean(process.env.ALPHA_VANTAGE_KEY ?? process.env.ALPHAVANTAGE_API_KEY)
+      : undefined,
     newsApi: newsApiEnabled ? clean(process.env.NEWS_API_KEY) : undefined,
     finnhubEnabled,
   };
