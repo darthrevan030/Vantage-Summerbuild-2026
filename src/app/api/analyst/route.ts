@@ -11,10 +11,11 @@ export const dynamic = "force-dynamic";
 
 // ---------- streaming adapters ----------
 async function streamAnthropic(
-  { system, user, maxTokens, signal, send }: {
+  { system, user, maxTokens, temperature, signal, send }: {
     system: string;
     user: string;
     maxTokens: number;
+    temperature: number;
     signal: AbortSignal;
     send: SSESend;
   },
@@ -26,6 +27,7 @@ async function streamAnthropic(
       {
         model: "claude-sonnet-4-6",
         max_tokens: maxTokens,
+        temperature,
         system,
         messages: [{ role: "user", content: user }],
       },
@@ -52,10 +54,11 @@ async function streamAnthropic(
 }
 
 async function streamOpenRouter(
-  { system, user, maxTokens, signal, send }: {
+  { system, user, maxTokens, temperature, signal, send }: {
     system: string;
     user: string;
     maxTokens: number;
+    temperature: number;
     signal: AbortSignal;
     send: SSESend;
   },
@@ -73,6 +76,7 @@ async function streamOpenRouter(
       body: JSON.stringify({
         model: process.env.OPENROUTER_MODEL,
         max_tokens: maxTokens,
+        temperature,
         stream: true,
         messages: [
           { role: "system", content: system },
@@ -156,10 +160,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid request" }, { status: 400 });
   }
 
-  const { system, user, maxTokens } =
+  const { system, user, maxTokens, temperature } =
     parsed.mode === "sentiment"
-      ? buildSentiment(parsed.assets)
-      : buildAsk(parsed.question, parsed.holdings, parsed.totalSGD);
+      ? buildSentiment(parsed.assets, parsed.portfolio)
+      : buildAsk(parsed.question, parsed.holdings, parsed.portfolio);
 
   const encoder = new TextEncoder();
 
@@ -177,9 +181,9 @@ export async function POST(req: Request) {
 
       try {
         if (canUseOpenRouter) {
-          await streamOpenRouter({ system, user, maxTokens, signal: req.signal, send });
+          await streamOpenRouter({ system, user, maxTokens, temperature, signal: req.signal, send });
         } else {
-          await streamAnthropic({ system, user, maxTokens, signal: req.signal, send });
+          await streamAnthropic({ system, user, maxTokens, temperature, signal: req.signal, send });
         }
       } finally {
         try {
