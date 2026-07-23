@@ -6,12 +6,14 @@ export function useCountUp(target: number, dur = 1200, run = true): number {
   const [v, setV] = useState(run ? 0 : target);
 
   useEffect(() => {
+    // Deferred (like the rAF tick below) so these aren't synchronous setState
+    // calls within the effect body itself.
     if (!run) {
-      setV(target);
+      Promise.resolve().then(() => setV(target));
       return;
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setV(target);
+      Promise.resolve().then(() => setV(target));
       return;
     }
 
