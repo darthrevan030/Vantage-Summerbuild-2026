@@ -32,7 +32,6 @@ export function Donut({
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
   const total = data.reduce((s, d) => s + d.value, 0);
-  let acc = 0;
 
   // Compute cumulative fractions so we can find which slice the mouse is over
   const fracs: number[] = [];
@@ -87,8 +86,9 @@ export function Donut({
         {data.map((d, i) => {
           const frac = d.value / total;
           const len = Math.max(c * frac - gap, 0.001);
-          const off = -acc * c;
-          acc += frac;
+          // Offset = cumulative fraction *before* this slice (fracs[i] is
+          // cumulative through this slice, so back off by one).
+          const off = -(i === 0 ? 0 : fracs[i - 1]) * c;
           const dim = highlight >= 0 && highlight !== i;
           return (
             <circle

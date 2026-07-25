@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   fetchHoldings,
-  upsertInstrument,
-  insertLot,
   deleteLot,
   deleteAllLotsForUser,
   updateLot,
   updateInstrumentForLot,
-  upsertHoldingOverride,
   upsertHoldingOverrideForLot,
-  seedTickerQuote,
+  fetchUserSettings,
+  fetchLotById,
+  fetchMatchedQuantityForBuyLot,
+  fetchMatchedQuantityForSellLot,
+  insertAutoCashTransaction,
+  deleteCashTransactionsByLotId,
 } from "@/lib/supabase/data";
 import { requireAuth } from "@/lib/supabase/guards";
 import { CCY_FLAG, SUPPORTED_CURRENCIES } from "@/lib/formatters";
 import { ASSET_TYPES } from "@/types/holding";
+import { InvalidAllocationError, InsufficientOpenQuantityError } from "@/lib/realized";
+import { commitLot, validateLotInput, type LotCommitInput } from "@/lib/holdings/commit-lot";
 
 const TICKER_RE = /^[A-Za-z0-9.\-:]{1,20}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,159 +40,27 @@ export async function POST(req: NextRequest) {
   const { user, error } = await requireAuth();
   if (error) return error;
 
-  const body = await req.json();
-  const {
-    ticker,
-    name,
-    asset_type,
-    broker,
-    strategy,
-    units,
-    currency,
-    flag,
-    icon,
-    buy_price,
-    buy_date,
-    buy_fx_rate,
-    current_price,
-    current_fx_rate,
-    spark_data,
-    notes,
-  } = body;
+  const userSettings = await fetchUserSettings(user.id);
+  const body = (await req.json()) as LotCommitInput;
 
-  // Format guards
-  if (ticker && !TICKER_RE.test(String(ticker)))
-    return NextResponse.json(
-      { error: "invalid ticker format" },
-      { status: 400 },
-    );
-  if (name && String(name).length > 200)
-    return NextResponse.json({ error: "name too long" }, { status: 400 });
-  if (notes && String(notes).length > 2000)
-    return NextResponse.json({ error: "notes too long" }, { status: 400 });
-  if (buy_date && !DATE_RE.test(String(buy_date)))
-    return NextResponse.json(
-      { error: "invalid buy_date format" },
-      { status: 400 },
-    );
+  const invalid = validateLotInput(body);
+  if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
 
-  if (
-    !ticker ||
-    !name ||
-    !asset_type ||
-    !buy_price ||
-    !buy_date ||
-    !units ||
-    !currency
-  ) {
-    return NextResponse.json(
-      { error: "Missing required fields" },
-      { status: 400 },
-    );
-  }
-
-  // Numeric guards
-  if (!finiteNonNeg(units) || Number(units) <= 0)
-    return NextResponse.json({ error: "invalid units" }, { status: 400 });
-  if (!finiteNonNeg(buy_price))
-    return NextResponse.json({ error: "invalid buy_price" }, { status: 400 });
-  if (buy_fx_rate !== undefined && !finiteNonNeg(buy_fx_rate))
-    return NextResponse.json({ error: "invalid buy_fx_rate" }, { status: 400 });
-  if (current_price !== undefined && !finiteNonNeg(current_price))
-    return NextResponse.json(
-      { error: "invalid current_price" },
-      { status: 400 },
-    );
-  if (current_fx_rate !== undefined && !finiteNonNeg(current_fx_rate))
-    return NextResponse.json(
-      { error: "invalid current_fx_rate" },
-      { status: 400 },
-    );
-  if (Array.isArray(spark_data) && spark_data.length > 400)
-    return NextResponse.json(
-      { error: "spark_data too large" },
-      { status: 400 },
-    );
-
-  // Extra lot / instrument fields (optional)
-  const {
-    exchange_code,
-    source,
-    fees,
-    transaction_type,
-    maturity_date,
-    par_value,
-    coupon_rate,
-    dividend_yield,
-  } = body;
-
-  if (source !== undefined && !["CPF", "SRS", "Cash", ""].includes(String(source)))
-    return NextResponse.json({ error: "invalid source" }, { status: 400 });
-  if (
-    transaction_type !== undefined &&
-    !["buy", "sell"].includes(String(transaction_type))
-  )
-    return NextResponse.json({ error: "invalid transaction_type" }, { status: 400 });
-  if (fees !== undefined && !finiteNonNeg(fees))
-    return NextResponse.json({ error: "invalid fees" }, { status: 400 });
-  if (maturity_date !== undefined && maturity_date !== null && !DATE_RE.test(String(maturity_date)))
-    return NextResponse.json({ error: "invalid maturity_date" }, { status: 400 });
-  if (par_value !== undefined && par_value !== null && !finiteNonNeg(par_value))
-    return NextResponse.json({ error: "invalid par_value" }, { status: 400 });
-  if (coupon_rate !== undefined && coupon_rate !== null && !finiteNonNeg(coupon_rate))
-    return NextResponse.json({ error: "invalid coupon_rate" }, { status: 400 });
-  if (dividend_yield !== undefined && dividend_yield !== null && !finiteNonNeg(dividend_yield))
-    return NextResponse.json({ error: "invalid dividend_yield" }, { status: 400 });
-
-  // 1. Upsert the shared security record → instrument id
-  const instrumentId = await upsertInstrument({
-    symbol: String(ticker),
-    exchangeCode: exchange_code ? String(exchange_code) : null,
-    assetType: String(asset_type),
-    currency: String(currency),
-    name: String(name),
-    flag: String(flag ?? "🌐"),
-    icon: String(icon ?? "briefcase"),
-    parValue: par_value != null ? Number(par_value) : null,
-    couponRate: coupon_rate != null ? Number(coupon_rate) : null,
-    maturityDate: maturity_date ? String(maturity_date) : null,
-  });
-  if (!instrumentId)
-    return NextResponse.json({ error: "Insert failed" }, { status: 500 });
-
-  // 2. Seed a quote so the holding shows a price before the first refresh
-  //    (no-op if a shared quote already exists for this symbol)
-  await seedTickerQuote(
-    String(ticker),
-    Number(current_price ?? buy_price),
-    Array.isArray(spark_data) ? spark_data : undefined,
-  );
-
-  // 3. Insert the user's transaction leg
-  const row = await insertLot(user.id, instrumentId, {
-    transactionType: transaction_type === "sell" ? "sell" : "buy",
-    quantity: Number(units),
-    price: Number(buy_price),
-    tradeDate: String(buy_date),
-    fxRate: Number(buy_fx_rate ?? 1),
-    fees: fees != null ? Number(fees) : 0,
-    source: source != null ? String(source) : "",
-    broker: String(broker ?? ""),
-    strategy: String(strategy ?? "long_term"),
-    notes: notes ? String(notes) : null,
-  });
-
-  if (!row) {
+  try {
+    const row = await commitLot(user.id, body, userSettings);
+    return NextResponse.json(row, { status: 201 });
+  } catch (e) {
+    if (
+      e instanceof InvalidAllocationError ||
+      e instanceof InsufficientOpenQuantityError ||
+      (e instanceof Error &&
+        e.message === "specific cost-basis method requires lot_allocations")
+    ) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    console.error("[POST /api/holdings]", e);
     return NextResponse.json({ error: "Insert failed" }, { status: 500 });
   }
-
-  // Persist a manual dividend-yield override if one was supplied
-  if (dividend_yield !== undefined && dividend_yield !== null) {
-    await upsertHoldingOverride(user.id, instrumentId, Number(dividend_yield));
-    row.dividendYield = Number(dividend_yield);
-  }
-
-  return NextResponse.json(row, { status: 201 });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -198,6 +70,11 @@ export async function PATCH(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const existingLot = await fetchLotById(id, user.id);
+  if (!existingLot) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const userSettings = await fetchUserSettings(user.id);
 
   const body = await req.json();
 
@@ -218,6 +95,10 @@ export async function PATCH(req: NextRequest) {
   for (const [bodyKey, col] of Object.entries(LOT_MAP)) {
     if (body[bodyKey] !== undefined) lotPatch[col] = body[bodyKey];
   }
+
+  const touchesFinancialFields = ["quantity", "price", "trade_date", "fx_rate", "fees"].some(
+    (k) => lotPatch[k] !== undefined,
+  );
 
   // Instrument-level fields (shared security metadata) → updated via admin client
   const instPatch: Record<string, unknown> = {};
@@ -286,6 +167,41 @@ export async function PATCH(req: NextRequest) {
   if (lotPatch.quantity !== undefined && Number(lotPatch.quantity) <= 0)
     return NextResponse.json({ error: "invalid units" }, { status: 400 });
 
+  // A buy lot that's already been matched by a realized sale can't have its
+  // quantity reduced below the matched amount — realized_lots stores a frozen
+  // price/fx snapshot, not a live join, but the remaining OPEN quantity must
+  // still make physical sense.
+  if (existingLot.transactionType === "buy" && lotPatch.quantity !== undefined) {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0 && Number(lotPatch.quantity) < matched) {
+      return NextResponse.json(
+        {
+          error: `This lot has ${matched} unit(s) already matched to realized sales and can't be reduced below that.`,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  // A sell lot that's already been matched can't have its financial terms
+  // edited — the realized record is frozen at sell-commit time and editing
+  // the sale afterward would make it inconsistent with what was recorded.
+  // Delete and re-enter the sale instead (delete cascades realized_lots).
+  if (existingLot.transactionType === "sell") {
+    if (touchesFinancialFields) {
+      const matched = await fetchMatchedQuantityForSellLot(id, user.id);
+      if (matched > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "This sale has already been matched to realized P&L. Delete it and record a new sale instead of editing the amount, price, date, FX rate, or fees.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+  }
+
   // Dividend-yield override (per user + instrument). null clears it.
   const hasDividend = body.dividend_yield !== undefined;
   if (
@@ -332,6 +248,25 @@ export async function PATCH(req: NextRequest) {
   const row = await updateLot(id, user.id, lotPatch);
   if (!row)
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
+
+  if (userSettings.trackCash && touchesFinancialFields) {
+    await deleteCashTransactionsByLotId(id, user.id);
+    const grossAmount = row.units * row.buyPrice;
+    const cashAmount =
+      row.transactionType === "sell"
+        ? grossAmount - row.fees
+        : -(grossAmount + row.fees);
+    await insertAutoCashTransaction(user.id, id, {
+      date: row.buyDate,
+      type: row.transactionType,
+      currency: row.currency,
+      amount: cashAmount,
+      fxRate: row.buyFxRate,
+      broker: row.broker,
+      source: row.source,
+    });
+  }
+
   return NextResponse.json(row);
 }
 
@@ -349,6 +284,19 @@ export async function DELETE(req: NextRequest) {
 
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const existingLot = await fetchLotById(id, user.id);
+  if (existingLot?.transactionType === "buy") {
+    const matched = await fetchMatchedQuantityForBuyLot(id, user.id);
+    if (matched > 0) {
+      return NextResponse.json(
+        {
+          error: "This lot has units matched to realized sales and can't be deleted.",
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   await deleteLot(id, user.id);
   return NextResponse.json({ ok: true });

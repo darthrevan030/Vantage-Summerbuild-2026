@@ -1,7 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
+import { type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { HoldingRow } from "@/types/holding";
-import type { UserSettings } from "@/types/settings";
+import type { UserSettings, CostBasisMethod } from "@/types/settings";
+import type { CashTransaction, CashTransactionType } from "@/types/cash";
+import type { RealizedLot } from "@/types/realized";
+import type { LotMatch, OpenBuyLot } from "@/lib/realized";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   computeCurrentValueSGD,
@@ -9,6 +13,8 @@ import {
   computeAssetGainSGD,
   computeFxGainSGD,
 } from "@/lib/fx";
+import { toNetPositions } from "@/lib/group-holdings";
+import { sgtDate } from "@/lib/dates";
 
 async function makeServerClient() {
   const cookieStore = await cookies();
@@ -30,7 +36,7 @@ async function makeServerClient() {
   );
 }
 
-type ServerClient = Awaited<ReturnType<typeof makeServerClient>>;
+type ServerClient = SupabaseClient;
 
 // ── Normalised DB row shapes ──────────────────────────────────────────────────
 // User data lives in `lots` + `instruments`; shared market data in `ticker_quotes`
@@ -107,6 +113,7 @@ function toHoldingRow(
     ticker: inst.symbol,
     name: inst.name,
     assetType: inst.asset_type,
+    exchangeCode: inst.exchange_code ?? null,
     broker: lot.broker,
     strategy: lot.strategy,
     units: Number(lot.quantity),
@@ -203,8 +210,11 @@ async function hydrateLot(
   );
 }
 
-export async function fetchHoldings(userId: string): Promise<HoldingRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchHoldings(
+  userId: string,
+  client?: ServerClient,
+): Promise<HoldingRow[]> {
+  const supabase = client ?? (await makeServerClient());
 
   // 1. lots + embedded instrument (single FK join)
   const { data: lotsData, error } = await supabase
@@ -530,6 +540,18 @@ export async function deleteLot(id: string, userId: string): Promise<void> {
 // are gone). Returns the number of rows removed for the confirmation toast.
 export async function deleteAllLotsForUser(userId: string): Promise<number> {
   const supabase = await makeServerClient();
+  // realized_lots.buy_lot_id is ON DELETE RESTRICT, so a buy lot referenced by a
+  // realized sale blocks `DELETE FROM lots`. Clear the user's realized rows first
+  // (RLS lets a user manage their own). Auto cash_transactions then cascade with
+  // the lots; manual cash (lot_id null) is left intact.
+  const { error: realizedError } = await supabase
+    .from("realized_lots")
+    .delete()
+    .eq("user_id", userId);
+  if (realizedError) {
+    console.error("[deleteAllLotsForUser] realized_lots", realizedError.message);
+    return 0;
+  }
   const { data, error } = await supabase
     .from("lots")
     .delete()
@@ -647,10 +669,10 @@ export async function upsertTickerHistory(
 }
 
 // Read the full daily FX history cache: { currency: { "YYYY-MM-DD": rate } }.
-export async function fetchFxRateHistory(): Promise<
-  Record<string, Record<string, number>>
-> {
-  const supabase = await makeServerClient();
+export async function fetchFxRateHistory(
+  client?: ServerClient,
+): Promise<Record<string, Record<string, number>>> {
+  const supabase = client ?? (await makeServerClient());
   const { data } = await supabase.from("fx_history").select("currency, rates");
   const out: Record<string, Record<string, number>> = {};
   for (const r of (data ?? []) as {
@@ -684,34 +706,6 @@ export async function updateFxRate(
     .update({ rate_sgd: rateSgd })
     .eq("code", currency);
   if (error) console.error("[updateFxRate]", error.message);
-}
-
-// ── Cash balances ─────────────────────────────────────────────────────────────
-
-export async function fetchCashBalances(
-  userId: string,
-): Promise<{ currency: string; amount: number }[]> {
-  const supabase = await makeServerClient();
-  const { data } = await supabase
-    .from("cash_balances")
-    .select("currency, amount")
-    .eq("user_id", userId)
-    .order("currency");
-  return (data ?? []).map((r) => ({
-    currency: r.currency as string,
-    amount: Number(r.amount),
-  }));
-}
-
-export async function upsertCashBalance(
-  userId: string,
-  currency: string,
-  amount: number,
-): Promise<void> {
-  const supabase = await makeServerClient();
-  await supabase
-    .from("cash_balances")
-    .upsert({ user_id: userId, currency, amount }, { onConflict: "user_id,currency" });
 }
 
 // ── CPF balances ──────────────────────────────────────────────────────────────
@@ -760,13 +754,15 @@ export async function fetchUserSettings(userId: string): Promise<UserSettings> {
   const supabase = await makeServerClient();
   const { data } = await supabase
     .from("user_settings")
-    .select("display_name, base_currency, role")
+    .select("display_name, base_currency, role, cost_basis_method, track_cash")
     .eq("user_id", userId)
     .single();
   return {
     displayName: data?.display_name ?? "",
     baseCurrency: data?.base_currency ?? "SGD",
     role: data?.role ?? "user",
+    costBasisMethod: (data?.cost_basis_method as CostBasisMethod) ?? "fifo",
+    trackCash: data?.track_cash ?? true,
   };
 }
 
@@ -783,8 +779,11 @@ export interface SnapshotRow {
 // snapshot history comes through regardless of that cap or how many rows accrue.
 const SNAPSHOT_PAGE = 1000;
 
-export async function fetchSnapshots(userId: string): Promise<SnapshotRow[]> {
-  const supabase = await makeServerClient();
+export async function fetchSnapshots(
+  userId: string,
+  client?: ServerClient,
+): Promise<SnapshotRow[]> {
+  const supabase = client ?? (await makeServerClient());
   const rows: SnapshotRow[] = [];
 
   for (let from = 0; ; from += SNAPSHOT_PAGE) {
@@ -824,11 +823,14 @@ export async function recordSnapshot(
   userId: string,
   holdings: HoldingRow[],
 ): Promise<void> {
-  const valueSgd = holdings.reduce((s, h) => s + h.valueSGD, 0);
-  const costSgd = holdings.reduce((s, h) => s + h.costSGD, 0);
-  const fxImpactSgd = holdings.reduce((s, h) => s + h.fxGain, 0);
+  // Aggregate over NET positions (buys − sells) so a recorded sale reduces the
+  // snapshot instead of inflating it, matching every other portfolio aggregate.
+  const net = toNetPositions(holdings);
+  const valueSgd = net.reduce((s, h) => s + h.valueSGD, 0);
+  const costSgd = net.reduce((s, h) => s + h.costSGD, 0);
+  const fxImpactSgd = net.reduce((s, h) => s + h.fxGain, 0);
   const fxByCurrency: Record<string, number> = {};
-  for (const h of holdings) {
+  for (const h of net) {
     if (h.currency !== "SGD") {
       const k = h.currency.toLowerCase();
       fxByCurrency[k] = (fxByCurrency[k] ?? 0) + h.fxGain;
@@ -838,7 +840,7 @@ export async function recordSnapshot(
   await supabase.from("portfolio_snapshots").upsert(
     {
       user_id: userId,
-      recorded_date: new Date().toISOString().slice(0, 10),
+      recorded_date: sgtDate(),
       value_sgd: Math.round(valueSgd),
       cost_sgd: Math.round(costSgd),
       fx_impact_sgd: Math.round(fxImpactSgd),
@@ -862,8 +864,534 @@ export async function upsertUserSettings(
       ...(settings.baseCurrency !== undefined && {
         base_currency: settings.baseCurrency,
       }),
+      ...(settings.costBasisMethod !== undefined && {
+        cost_basis_method: settings.costBasisMethod,
+      }),
+      ...(settings.trackCash !== undefined && {
+        track_cash: settings.trackCash,
+      }),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
   );
+}
+
+// ── Realized lots (T6) ────────────────────────────────────────────────────────
+
+interface DbRealizedLot {
+  id: string;
+  instrument_id: string;
+  sell_lot_id: string;
+  buy_lot_id: string;
+  method: CostBasisMethod;
+  matched_quantity: number;
+  matched_buy_price: number;
+  matched_buy_fx: number;
+  sell_price: number;
+  sell_fx: number;
+  asset_gain_sgd: number;
+  fx_gain_sgd: number;
+  realized_date: string;
+  instruments?: DbInstrument | null;
+}
+
+function toRealizedLot(row: DbRealizedLot, inst: DbInstrument): RealizedLot {
+  return {
+    id: row.id,
+    instrumentId: row.instrument_id,
+    ticker: inst.symbol,
+    name: inst.name,
+    assetType: inst.asset_type,
+    currency: inst.currency,
+    flag: inst.flag,
+    icon: inst.icon,
+    sellLotId: row.sell_lot_id,
+    buyLotId: row.buy_lot_id,
+    method: row.method,
+    matchedQuantity: Number(row.matched_quantity),
+    matchedBuyPrice: Number(row.matched_buy_price),
+    matchedBuyFx: Number(row.matched_buy_fx),
+    sellPrice: Number(row.sell_price),
+    sellFx: Number(row.sell_fx),
+    assetGainSgd: Number(row.asset_gain_sgd),
+    fxGainSgd: Number(row.fx_gain_sgd),
+    realizedDate: row.realized_date,
+  };
+}
+
+// Buy lots still open for an instrument, netted against every existing
+// realized_lots match. Fresh on every call — never cached, since sells must
+// always match against the true current remainder.
+export async function fetchOpenBuyLots(
+  userId: string,
+  instrumentId: string,
+): Promise<OpenBuyLot[]> {
+  const supabase = await makeServerClient();
+  const [{ data: buyLots }, { data: matches }] = await Promise.all([
+    supabase
+      .from("lots")
+      .select("id, quantity, price, fx_rate, fees, trade_date")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId)
+      .eq("transaction_type", "buy"),
+    supabase
+      .from("realized_lots")
+      .select("buy_lot_id, matched_quantity")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId),
+  ]);
+
+  const matchedByLot = new Map<string, number>();
+  for (const m of matches ?? []) {
+    const key = m.buy_lot_id as string;
+    matchedByLot.set(key, (matchedByLot.get(key) ?? 0) + Number(m.matched_quantity));
+  }
+
+  return (buyLots ?? [])
+    .map((l) => {
+      const quantity = Number(l.quantity);
+      const matched = matchedByLot.get(l.id as string) ?? 0;
+      return {
+        id: l.id as string,
+        tradeDate: l.trade_date as string,
+        price: Number(l.price),
+        fxRate: Number(l.fx_rate),
+        fees: Number(l.fees),
+        quantity,
+        openQuantity: quantity - matched,
+      };
+    })
+    .filter((l) => l.openQuantity > 1e-9);
+}
+
+export async function insertRealizedLots(
+  userId: string,
+  instrumentId: string,
+  sellLotId: string,
+  method: CostBasisMethod,
+  realizedDate: string,
+  sellPrice: number,
+  sellFx: number,
+  matches: LotMatch[],
+): Promise<void> {
+  if (matches.length === 0) return;
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("realized_lots").insert(
+    matches.map((m) => ({
+      user_id: userId,
+      instrument_id: instrumentId,
+      sell_lot_id: sellLotId,
+      buy_lot_id: m.buyLotId,
+      method,
+      matched_quantity: m.matchedQuantity,
+      matched_buy_price: m.matchedBuyPrice,
+      matched_buy_fx: m.matchedBuyFx,
+      sell_price: sellPrice,
+      sell_fx: sellFx,
+      asset_gain_sgd: m.assetGainSgd,
+      fx_gain_sgd: m.fxGainSgd,
+      realized_date: realizedDate,
+    })),
+  );
+  if (error) console.error("[insertRealizedLots]", error.message);
+}
+
+export async function fetchRealizedLots(userId: string): Promise<RealizedLot[]> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("realized_lots")
+    .select("*, instruments(*)")
+    .eq("user_id", userId)
+    .order("realized_date", { ascending: true });
+  if (error) {
+    console.error("[fetchRealizedLots]", error.message);
+    return [];
+  }
+  return (data as DbRealizedLot[])
+    .filter((r) => r.instruments)
+    .map((r) => toRealizedLot(r, r.instruments!));
+}
+
+export interface UnmatchedSellLot {
+  id: string;
+  instrumentId: string;
+  ticker: string;
+  quantity: number;
+  price: number;
+  fxRate: number;
+  fees: number;
+  tradeDate: string;
+}
+
+// Sell lots with zero realized_lots rows yet, oldest first — reconcileRealizedLots
+// (reconcile-realized.ts) processes these sequentially so each sell's matches are
+// committed before the next sell's open-quantity is computed.
+export async function fetchUnmatchedSellLots(
+  userId: string,
+): Promise<UnmatchedSellLot[]> {
+  const supabase = await makeServerClient();
+  const [{ data: sells }, { data: matched, error: matchedError }] = await Promise.all([
+    supabase
+      .from("lots")
+      .select("id, instrument_id, quantity, price, fx_rate, fees, trade_date, instruments(symbol)")
+      .eq("user_id", userId)
+      .eq("transaction_type", "sell")
+      .order("trade_date", { ascending: true }),
+    supabase.from("realized_lots").select("sell_lot_id").eq("user_id", userId),
+  ]);
+  if (matchedError) {
+    console.error("[fetchUnmatchedSellLots]", matchedError.message);
+    return [];
+  }
+  const matchedIds = new Set((matched ?? []).map((m) => m.sell_lot_id as string));
+  return (sells ?? [])
+    .filter((s) => !matchedIds.has(s.id as string))
+    .map((s) => ({
+      id: s.id as string,
+      instrumentId: s.instrument_id as string,
+      ticker: (s.instruments as unknown as { symbol: string } | null)?.symbol ?? "",
+      quantity: Number(s.quantity),
+      price: Number(s.price),
+      fxRate: Number(s.fx_rate),
+      fees: Number(s.fees),
+      tradeDate: s.trade_date as string,
+    }));
+}
+
+export async function fetchLotById(
+  id: string,
+  userId: string,
+): Promise<{
+  id: string;
+  instrumentId: string;
+  transactionType: "buy" | "sell";
+  quantity: number;
+  tradeDate: string;
+} | null> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("lots")
+    .select("id, instrument_id, transaction_type, quantity, trade_date")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id as string,
+    instrumentId: data.instrument_id as string,
+    transactionType: data.transaction_type as "buy" | "sell",
+    quantity: Number(data.quantity),
+    tradeDate: data.trade_date as string,
+  };
+}
+
+export async function fetchMatchedQuantityForBuyLot(
+  buyLotId: string,
+  userId: string,
+): Promise<number> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("realized_lots")
+    .select("matched_quantity")
+    .eq("buy_lot_id", buyLotId)
+    .eq("user_id", userId);
+  return (data ?? []).reduce((s, r) => s + Number(r.matched_quantity), 0);
+}
+
+export async function fetchMatchedQuantityForSellLot(
+  sellLotId: string,
+  userId: string,
+): Promise<number> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("realized_lots")
+    .select("matched_quantity")
+    .eq("sell_lot_id", sellLotId)
+    .eq("user_id", userId);
+  return (data ?? []).reduce((s, r) => s + Number(r.matched_quantity), 0);
+}
+
+// Resolves a ticker to its instrument id via the user's own lots — tickers are
+// the grouping key everywhere else in the app (bucketByPosition), so this
+// follows the same convention rather than requiring the client to know
+// instrument ids at all.
+export async function resolveInstrumentIdForTicker(
+  userId: string,
+  ticker: string,
+): Promise<string | null> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("lots")
+    .select("instrument_id, instruments!inner(symbol)")
+    .eq("user_id", userId)
+    .eq("instruments.symbol", ticker)
+    .limit(1)
+    .maybeSingle();
+  return (data?.instrument_id as string) ?? null;
+}
+
+// ── Cash transactions (T7) ─────────────────────────────────────────────────────
+
+interface DbCashTransaction {
+  id: string;
+  lot_id: string | null;
+  transfer_group_id: string | null;
+  date: string;
+  type: CashTransactionType;
+  currency: string;
+  amount: number;
+  fx_rate: number;
+  broker: string;
+  source: string;
+  note: string | null;
+}
+
+function toCashTransaction(row: DbCashTransaction): CashTransaction {
+  return {
+    id: row.id,
+    lotId: row.lot_id,
+    transferGroupId: row.transfer_group_id,
+    date: row.date,
+    type: row.type,
+    currency: row.currency,
+    amount: Number(row.amount),
+    fxRate: Number(row.fx_rate),
+    broker: row.broker,
+    source: row.source,
+    note: row.note,
+  };
+}
+
+const CASH_TX_COLUMNS =
+  "id, lot_id, transfer_group_id, date, type, currency, amount, fx_rate, broker, source, note";
+
+export async function fetchCashTransactions(userId: string): Promise<CashTransaction[]> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .select(CASH_TX_COLUMNS)
+    .eq("user_id", userId)
+    .order("date", { ascending: false });
+  if (error) {
+    console.error("[fetchCashTransactions]", error.message);
+    return [];
+  }
+  return (data as DbCashTransaction[]).map(toCashTransaction);
+}
+
+export async function fetchCashBalancesLive(
+  userId: string,
+): Promise<{ currency: string; amount: number }[]> {
+  const transactions = await fetchCashTransactions(userId);
+  const byCurrency = new Map<string, number>();
+  for (const t of transactions) {
+    byCurrency.set(t.currency, (byCurrency.get(t.currency) ?? 0) + t.amount);
+  }
+  return Array.from(byCurrency.entries())
+    .map(([currency, amount]) => ({ currency, amount }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+export interface ManualCashInput {
+  date: string;
+  type: CashTransactionType;
+  currency: string;
+  amount: number;
+  fxRate: number;
+  broker: string;
+  source: string;
+  note: string | null;
+}
+
+export async function insertCashTransaction(
+  userId: string,
+  input: ManualCashInput,
+): Promise<CashTransaction | null> {
+  const supabase = await makeServerClient();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .insert({
+      user_id: userId,
+      date: input.date,
+      type: input.type,
+      currency: input.currency,
+      amount: input.amount,
+      fx_rate: input.fxRate,
+      broker: input.broker,
+      source: input.source,
+      note: input.note,
+    })
+    .select(CASH_TX_COLUMNS)
+    .single();
+  if (error) {
+    console.error("[insertCashTransaction]", error.message);
+    return null;
+  }
+  return toCashTransaction(data as DbCashTransaction);
+}
+
+export interface TransferInput {
+  date: string;
+  currency: string;
+  amount: number;
+  fxRate: number;
+  fromBroker: string;
+  toBroker: string;
+  note: string | null;
+}
+
+export async function insertTransferPair(
+  userId: string,
+  input: TransferInput,
+): Promise<[CashTransaction, CashTransaction] | null> {
+  const supabase = await makeServerClient();
+  const groupId = crypto.randomUUID();
+  const { data, error } = await supabase
+    .from("cash_transactions")
+    .insert([
+      {
+        user_id: userId,
+        date: input.date,
+        type: "transfer",
+        currency: input.currency,
+        amount: -input.amount,
+        fx_rate: input.fxRate,
+        broker: input.fromBroker,
+        source: "",
+        note: input.note,
+        transfer_group_id: groupId,
+      },
+      {
+        user_id: userId,
+        date: input.date,
+        type: "transfer",
+        currency: input.currency,
+        amount: input.amount,
+        fx_rate: input.fxRate,
+        broker: input.toBroker,
+        source: "",
+        note: input.note,
+        transfer_group_id: groupId,
+      },
+    ])
+    .select(CASH_TX_COLUMNS);
+  if (error || !data || data.length !== 2) {
+    console.error("[insertTransferPair]", error?.message);
+    return null;
+  }
+  return [
+    toCashTransaction(data[0] as DbCashTransaction),
+    toCashTransaction(data[1] as DbCashTransaction),
+  ];
+}
+
+export async function deleteCashTransaction(
+  id: string,
+  userId: string,
+): Promise<"ok" | "not_found" | "auto_derived"> {
+  const supabase = await makeServerClient();
+  const { data } = await supabase
+    .from("cash_transactions")
+    .select("id, lot_id, transfer_group_id")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return "not_found";
+  if (data.lot_id) return "auto_derived";
+  if (data.transfer_group_id) {
+    await supabase
+      .from("cash_transactions")
+      .delete()
+      .eq("transfer_group_id", data.transfer_group_id)
+      .eq("user_id", userId);
+  } else {
+    await supabase.from("cash_transactions").delete().eq("id", id).eq("user_id", userId);
+  }
+  return "ok";
+}
+
+export interface AutoCashInput {
+  date: string;
+  type: "buy" | "sell";
+  currency: string;
+  amount: number;
+  fxRate: number;
+  broker: string;
+  source: string;
+}
+
+export async function insertAutoCashTransaction(
+  userId: string,
+  lotId: string,
+  input: AutoCashInput,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("cash_transactions").insert({
+    user_id: userId,
+    lot_id: lotId,
+    date: input.date,
+    type: input.type,
+    currency: input.currency,
+    amount: input.amount,
+    fx_rate: input.fxRate,
+    broker: input.broker,
+    source: input.source,
+    note: null,
+  });
+  if (error) console.error("[insertAutoCashTransaction]", error.message);
+}
+
+export async function deleteCashTransactionsByLotId(
+  lotId: string,
+  userId: string,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  await supabase
+    .from("cash_transactions")
+    .delete()
+    .eq("lot_id", lotId)
+    .eq("user_id", userId);
+}
+
+export async function insertLegacyCashSeed(
+  userId: string,
+  amountSgd: number,
+  date: string,
+): Promise<void> {
+  const supabase = await makeServerClient();
+  const { error } = await supabase.from("cash_transactions").insert({
+    user_id: userId,
+    date,
+    type: "deposit",
+    currency: "SGD",
+    amount: amountSgd,
+    fx_rate: 1,
+    broker: "",
+    source: "",
+    note: "legacy seed from cost basis",
+  });
+  if (error) console.error("[insertLegacyCashSeed]", error.message);
+}
+
+// Distinct user ids that hold at least one lot — the cron's work-list. Uses the
+// admin client so RLS doesn't hide other users' lots. Paged past the 1000-row cap.
+export async function fetchActiveUserIds(): Promise<string[]> {
+  const admin = createAdminClient();
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  for (let fromRow = 0; ; fromRow += PAGE) {
+    const { data, error } = await admin
+      .from("lots")
+      .select("user_id")
+      .order("user_id", { ascending: true })
+      .range(fromRow, fromRow + PAGE - 1);
+    if (error) {
+      console.error("[fetchActiveUserIds]", error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data) ids.add(r.user_id as string);
+    if (data.length < PAGE) break;
+  }
+  return [...ids];
 }

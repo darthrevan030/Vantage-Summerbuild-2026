@@ -1,5 +1,6 @@
 import type { HoldingRow } from "@/types/holding";
 import type { SnapshotRow } from "@/lib/supabase/data";
+import type { CashTransaction } from "@/types/cash";
 import type {
   HeroStats,
   MoverItem,
@@ -11,12 +12,21 @@ import type {
   FxSeriesPoint,
   PortfolioAnalytics,
 } from "@/types/portfolio";
+import type { RealizedLot, ClosedPosition } from "@/types/realized";
 import {
   computeCostBasisSGD,
   computeAssetGainSGD,
   computeFxGainSGD,
 } from "./fx";
 import { toNetPositions } from "./group-holdings";
+import {
+  computeTotalValueSeries,
+  computeFlowAdjustedReturns,
+  computeTWR,
+  annualise,
+  computeXIRR,
+  buildXirrFlows,
+} from "./returns";
 
 const PAL = ["#b79cff", "#5fd0c6", "#6fb0ff", "#f4a6cf", "#8b8bff", "#f0bd8a"];
 
@@ -63,16 +73,28 @@ export function buildBaseFxRates(
 export function computeHeroStats(
   holdings: HoldingRow[],
   snapshots: SnapshotRow[] = [],
+  realizedLots: RealizedLot[] = [],
 ): HeroStats {
   // Net out sells so totals reflect what's actually held, not gross lots.
   const positions = toNetPositions(holdings);
   const total = positions.reduce((s, h) => s + h.valueSGD, 0);
   const cost = positions.reduce((s, h) => s + h.costSGD, 0);
-  const totalGain = total - cost;
-  const totalGainPct = cost > 0 ? (totalGain / cost) * 100 : 0;
+  const unrealizedGain = total - cost;
+  const unrealizedGainPct = cost > 0 ? (unrealizedGain / cost) * 100 : 0;
   const fxImpact = positions.reduce((s, h) => s + h.fxGain, 0);
   const fxPct = cost > 0 ? (fxImpact / cost) * 100 : 0;
   const neutral = total - fxImpact;
+
+  const realizedGain = realizedLots.reduce(
+    (s, r) => s + r.assetGainSgd + r.fxGainSgd,
+    0,
+  );
+  const realizedCostBasis = realizedLots.reduce(
+    (s, r) => s + r.matchedQuantity * r.matchedBuyPrice * r.matchedBuyFx,
+    0,
+  );
+  const realizedGainPct =
+    realizedCostBasis > 0 ? (realizedGain / realizedCostBasis) * 100 : 0;
 
   // Day change from the most recent two distinct-date snapshots
   const today = new Date().toISOString().slice(0, 10);
@@ -96,8 +118,10 @@ export function computeHeroStats(
     total,
     dayChange,
     dayPct,
-    totalGain,
-    totalGainPct,
+    unrealizedGain,
+    unrealizedGainPct,
+    realizedGain,
+    realizedGainPct,
     fxImpact,
     fxPct,
     neutral,
@@ -105,6 +129,48 @@ export function computeHeroStats(
     portfolioYield,
     annualIncome,
   };
+}
+
+// Per-ticker lifetime realized totals, restricted to tickers with zero net
+// open units left (still-open tickers with a partial sell are excluded here —
+// their realized gain is already folded into hero.realizedGain, but they
+// belong on the Holdings "Open" view, not "Closed").
+export function computeRealizedSummary(
+  holdings: HoldingRow[],
+  realizedLots: RealizedLot[],
+): ClosedPosition[] {
+  const openTickers = new Set(toNetPositions(holdings).map((h) => h.ticker));
+
+  const byTicker = new Map<string, ClosedPosition>();
+  for (const r of realizedLots) {
+    const gain = r.assetGainSgd + r.fxGainSgd;
+    const existing = byTicker.get(r.ticker);
+    if (existing) {
+      existing.totalQuantitySold += r.matchedQuantity;
+      existing.realizedGainSgd += gain;
+      existing.assetGainSgd += r.assetGainSgd;
+      existing.fxGainSgd += r.fxGainSgd;
+      if (r.realizedDate > existing.lastSaleDate) existing.lastSaleDate = r.realizedDate;
+    } else {
+      byTicker.set(r.ticker, {
+        ticker: r.ticker,
+        name: r.name,
+        assetType: r.assetType,
+        currency: r.currency,
+        flag: r.flag,
+        icon: r.icon,
+        totalQuantitySold: r.matchedQuantity,
+        realizedGainSgd: gain,
+        assetGainSgd: r.assetGainSgd,
+        fxGainSgd: r.fxGainSgd,
+        lastSaleDate: r.realizedDate,
+      });
+    }
+  }
+
+  return Array.from(byTicker.values())
+    .filter((p) => !openTickers.has(p.ticker))
+    .sort((a, b) => b.lastSaleDate.localeCompare(a.lastSaleDate));
 }
 
 export function computeAllocationBySource(holdings: HoldingRow[]): AllocationBySource[] {
@@ -171,52 +237,59 @@ const EMPTY_ANALYTICS: PortfolioAnalytics = {
   worstDayDate: "",
   days: 0,
   series: [],
+  xirr: 0,
+  xirrByBroker: [],
+  xirrBySource: [],
 };
 
-/** Derives CAGR, Sharpe, annualised volatility, max drawdown, and best/worst
- *  single-day returns from the portfolio value snapshots. All percentages are
- *  returned in percentage points (e.g. 12.3 for 12.3%). */
+/** Derives TWR-based CAGR, Sharpe, annualised volatility, max drawdown,
+ *  best/worst single-day returns, and XIRR (portfolio-wide, per-broker,
+ *  per-source) from the portfolio value snapshots plus the cash-transactions
+ *  ledger. All percentages are returned in percentage points (e.g. 12.3 for
+ *  12.3%). With no cash transactions and no holdings supplied, this reduces
+ *  exactly to the pre-T8 naive calculation. */
 export function computePortfolioAnalytics(
   snapshots: SnapshotRow[],
+  cashTransactions: CashTransaction[] = [],
+  holdings: HoldingRow[] = [],
 ): PortfolioAnalytics {
-  // One value per date, chronological. Skip non-positive values (pre-funding).
-  const byDate = new Map<string, SnapshotRow>();
-  for (const s of snapshots) byDate.set(s.recordedDate, s);
-  const series = [...byDate.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, s]) => ({
-      date,
-      value: Math.round(s.valueSgd),
-      cost: Math.round(s.costSgd),
-    }))
-    .filter((p) => p.value > 0);
+  const rawSeries = computeTotalValueSeries(snapshots, cashTransactions).filter(
+    (p) => p.value > 0,
+  );
 
-  if (series.length < 2) return { ...EMPTY_ANALYTICS, series };
+  if (rawSeries.length < 2) return { ...EMPTY_ANALYTICS, series: rawSeries };
 
-  // Daily returns between consecutive snapshot dates
-  const dailyReturns: { date: string; r: number }[] = [];
-  for (let i = 1; i < series.length; i++) {
-    const prev = series[i - 1].value;
-    if (prev > 0) dailyReturns.push({ date: series[i].date, r: series[i].value / prev - 1 });
-  }
+  const depositWithdrawalFlows = cashTransactions
+    .filter((t) => t.type === "deposit" || t.type === "withdrawal")
+    .map((t) => ({ date: t.date, amountSgd: t.amount * t.fxRate }));
 
-  const returns = dailyReturns.map((d) => d.r);
+  const adjusted = computeFlowAdjustedReturns(rawSeries, depositWithdrawalFlows);
+  const returns = adjusted.map((d) => d.r);
+
   const actualSharpe = computeSharpeRatio(returns);
   const annualisedVol = stddev(returns) * Math.sqrt(TRADING_DAYS) * 100;
 
-  // CAGR over the actual elapsed span
-  const first = series[0];
-  const last = series[series.length - 1];
+  const first = rawSeries[0];
+  const last = rawSeries[rawSeries.length - 1];
   const msPerYear = 365.25 * 24 * 3600 * 1000;
   const years =
     (new Date(last.date).getTime() - new Date(first.date).getTime()) / msPerYear;
-  const cagr = years > 0 ? computeCAGR(first.value, last.value, years) : 0;
+  const twr = computeTWR(returns);
+  const cagr = years > 0 ? annualise(twr, years) : 0;
 
-  // Max drawdown: deepest peak-to-trough decline in value
-  let peak = series[0].value;
+  // Synthetic "growth of $1" index built from the same flow-adjusted returns,
+  // so a deposit/withdrawal day can't masquerade as an investment gain/loss in
+  // drawdown or best/worst-day. Scale-invariant, so with no flows this yields
+  // exactly the same drawdown/best/worst numbers as the raw value series did.
+  const index: { date: string; value: number }[] = [{ date: first.date, value: 1 }];
+  for (const d of adjusted) {
+    index.push({ date: d.date, value: index[index.length - 1].value * (1 + d.r) });
+  }
+
+  let peak = index[0].value;
   let maxDrawdown = 0;
   let maxDrawdownDate = "";
-  for (const p of series) {
+  for (const p of index) {
     if (p.value > peak) peak = p.value;
     const dd = peak > 0 ? (p.value - peak) / peak : 0;
     if (dd < maxDrawdown) {
@@ -225,13 +298,49 @@ export function computePortfolioAnalytics(
     }
   }
 
-  // Best / worst single-day return
-  let best = dailyReturns[0];
-  let worst = dailyReturns[0];
-  for (const d of dailyReturns) {
+  let best = adjusted[0];
+  let worst = adjusted[0];
+  for (const d of adjusted) {
     if (d.r > best.r) best = d;
     if (d.r < worst.r) worst = d;
   }
+
+  const endingValueSgd = last.value;
+  const xirr = computeXIRR(buildXirrFlows(cashTransactions, endingValueSgd, last.date)) * 100;
+
+  const brokers = [...new Set(holdings.map((h) => h.broker).filter(Boolean))];
+  const xirrByBroker = brokers.map((broker) => {
+    const brokerHoldingsValue = toNetPositions(
+      holdings.filter((h) => h.broker === broker),
+    ).reduce((s, h) => s + h.valueSGD, 0);
+    const brokerCashSgd = cashTransactions
+      .filter((t) => t.broker === broker)
+      .reduce((s, t) => s + t.amount * t.fxRate, 0);
+    const flows = buildXirrFlows(
+      cashTransactions,
+      brokerHoldingsValue + brokerCashSgd,
+      last.date,
+      { broker },
+    );
+    return { broker, xirr: computeXIRR(flows) * 100 };
+  });
+
+  const sources = [...new Set(holdings.map((h) => h.source).filter(Boolean))];
+  const xirrBySource = sources.map((source) => {
+    const sourceHoldingsValue = toNetPositions(
+      holdings.filter((h) => h.source === source),
+    ).reduce((s, h) => s + h.valueSGD, 0);
+    const sourceCashSgd = cashTransactions
+      .filter((t) => t.source === source)
+      .reduce((s, t) => s + t.amount * t.fxRate, 0);
+    const flows = buildXirrFlows(
+      cashTransactions,
+      sourceHoldingsValue + sourceCashSgd,
+      last.date,
+      { source },
+    );
+    return { source, xirr: computeXIRR(flows) * 100 };
+  });
 
   return {
     cagr,
@@ -243,8 +352,11 @@ export function computePortfolioAnalytics(
     bestDayDate: best.date,
     worstDayReturn: worst.r * 100,
     worstDayDate: worst.date,
-    days: series.length,
-    series,
+    days: rawSeries.length,
+    series: rawSeries,
+    xirr,
+    xirrByBroker,
+    xirrBySource,
   };
 }
 

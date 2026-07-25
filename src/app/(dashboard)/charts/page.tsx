@@ -298,10 +298,9 @@ function FXImpactCard() {
   } | null>(null);
 
   useEffect(() => {
-    if (baseCurrency === "SGD") {
-      setBaseSeries(null);
-      return;
-    }
+    // `useBase` below already gates on baseCurrency !== "SGD", so a stale
+    // baseSeries left in state while back on SGD is inert — no reset needed.
+    if (baseCurrency === "SGD") return;
     let cancelled = false;
     fetch(`/api/portfolio/fx-series?base=${baseCurrency}`)
       .then((r) => r.json())
@@ -527,13 +526,20 @@ function AnalyticsCards() {
   const gl = (n: number) => (n >= 0 ? "var(--gain)" : "var(--loss)");
 
   return (
-    <div className="grid grid-cols-5 gap-3.5 animate-reveal max-bp1080:grid-cols-3 max-bp600:grid-cols-2">
+    <div className="grid grid-cols-6 gap-3.5 animate-reveal max-bp1080:grid-cols-3 max-bp600:grid-cols-2">
       <MetricCard
-        label="CAGR"
+        label="TWR"
         value={pct(a.cagr)}
         color={gl(a.cagr)}
-        sub="annualised growth"
-        tip="Compound annual growth rate of portfolio value over the full recorded span."
+        sub="annualised, flow-adjusted"
+        tip="Time-weighted return: annualised growth with deposits and withdrawals backed out, so it reflects investment performance rather than how much capital you've added."
+      />
+      <MetricCard
+        label="XIRR"
+        value={pct(a.xirr)}
+        color={gl(a.xirr)}
+        sub="money-weighted"
+        tip="Money-weighted return (XIRR) across all your deposits and withdrawals — reflects your actual dollar-weighted experience, including the timing of your contributions."
       />
       <MetricCard
         label="Sharpe"

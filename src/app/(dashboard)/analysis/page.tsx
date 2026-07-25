@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useId } from "react";
 import { usePortfolio } from "@/context/portfolio";
 import { Icon } from "@/components/Icon";
 import { streamSentiment, streamAsk } from "@/lib/api/client/analyst-api";
-import { pct } from "@/lib/formatters";
 import { toNetPositions } from "@/lib/group-holdings";
+import { PAGE_SIZE } from "@/lib/news";
 import type { HoldingRow } from "@/types/holding";
+import type { AllocationSlice, CurrencyCard } from "@/types/portfolio";
+import type { PortfolioContext } from "@/lib/analyst/prompts";
 
 // shared gold button — matches the converted settings page pattern
 const BTN_GOLD =
@@ -144,7 +146,8 @@ function MiniSpark({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(260);
-  const idRef = useRef("ms" + Math.round(Math.random() * 1e9));
+  // Stable, unique gradient id per instance (no impurity, no ref read in render).
+  const id = "ms" + useId().replace(/:/g, "");
   useEffect(() => {
     const ro = new ResizeObserver((e) => setW(e[0].contentRect.width));
     if (ref.current) ro.observe(ref.current);
@@ -161,7 +164,6 @@ function MiniSpark({
     )
     .join(" ");
   const area = `${line} L${w},${height} L0,${height} Z`;
-  const id = idRef.current;
   return (
     <div ref={ref} style={{ width: "100%" }}>
       <svg
@@ -219,7 +221,7 @@ function ScoreRail({ score }: { score: number }) {
 }
 
 // ---- SentDrawer (headlines + 30-day trend) ----
-type HlItem = { t: string; src: string; sent: string; ago: string };
+type HlItem = { t: string; src: string; sent: string; ago: string; url?: string };
 type HlState = HlItem[] | "loading" | "no-key" | "empty";
 
 const HL_CACHE: Record<string, HlItem[]> = {};
@@ -260,6 +262,15 @@ function SentDrawer({
   sparkData: number[];
 }) {
   const [hl, setHl] = useState<HlState>(HL_CACHE[id] ?? "loading");
+  const [page, setPage] = useState(0);
+  const [prevId, setPrevId] = useState(id);
+  // Reset drawer state when the holding changes — done during render (React's
+  // "adjust state on prop change" pattern) rather than synchronously in an effect.
+  if (id !== prevId) {
+    setPrevId(id);
+    setPage(0);
+    setHl(HL_CACHE[id] ?? "loading");
+  }
   const useRealPrices = sparkData.length >= 2;
   const pts = useRealPrices ? sparkToSentPath(sparkData) : sentPath(id, score);
   const delta = useRealPrices
@@ -267,10 +278,9 @@ function SentDrawer({
     : pts[pts.length - 1] - pts[0];
 
   useEffect(() => {
-    if (HL_CACHE[id]) {
-      setHl(HL_CACHE[id]);
-      return;
-    }
+    // The render-time guard above already set hl from cache (or "loading");
+    // the effect only performs the async fetch when this symbol isn't cached.
+    if (HL_CACHE[id]) return;
     let live = true;
     (async () => {
       try {
@@ -359,27 +369,70 @@ function SentDrawer({
           </div>
         )}
         {Array.isArray(hl) &&
-          hl.map((h, i) => (
-            <div
-              className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5"
-              key={i}
-            >
-              <i
-                className={
-                  "w-[7px] h-[7px] rounded-full mt-[5px] flex-[0_0_auto] " +
-                  (HL_DOT_CLS[h.sent] ?? "")
-                }
-              />
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">
-                  {h.t}
-                </div>
-                <div className="text-[11px] text-muted font-mono tracking-[.02em]">
-                  {h.src} · {h.ago}
-                </div>
-              </div>
-            </div>
-          ))}
+          (() => {
+            const pageCount = Math.max(1, Math.ceil(hl.length / PAGE_SIZE));
+            const start = page * PAGE_SIZE;
+            const visible = hl.slice(start, start + PAGE_SIZE);
+            return (
+              <>
+                {visible.map((h, i) => (
+                  <div
+                    className="flex gap-[11px] items-start py-[9px] border-t border-subtle first:border-t-0 first:pt-0.5"
+                    key={start + i}
+                  >
+                    <i
+                      className={
+                        "w-[7px] h-[7px] rounded-full mt-[5px] flex-[0_0_auto] " +
+                        (HL_DOT_CLS[h.sent] ?? "")
+                      }
+                    />
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="text-[12.5px] text-primary leading-[1.4] [text-wrap:pretty]">
+                        {h.url && /^https?:\/\//i.test(h.url) ? (
+                          <a
+                            href={h.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline"
+                          >
+                            {h.t}
+                          </a>
+                        ) : (
+                          h.t
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted font-mono tracking-[.02em]">
+                        {h.src} · {h.ago}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {hl.length > PAGE_SIZE && (
+                  <div className="flex items-center justify-between pt-[9px] border-t border-subtle">
+                    <button
+                      type="button"
+                      disabled={page === 0}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      className="font-mono text-[11px] text-secondary disabled:opacity-40 hover:text-primary transition-colors"
+                    >
+                      ← prev
+                    </button>
+                    <span className="font-mono text-[11px] text-muted tracking-[.04em]">
+                      page {page + 1} / {pageCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={page >= pageCount - 1}
+                      onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                      className="font-mono text-[11px] text-secondary disabled:opacity-40 hover:text-primary transition-colors"
+                    >
+                      next →
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
       </div>
     </div>
   );
@@ -466,53 +519,6 @@ function SentCard({ it, delay }: { it: SentItem; delay: number }) {
           sparkData={it.sparkData}
         />
       )}
-    </div>
-  );
-}
-
-function SkelCard({ delay }: { delay: number }) {
-  return (
-    <div
-      className="card flex flex-col gap-[13px] px-5 py-4.5 max-bp768:overflow-hidden max-bp480:p-3.5 max-bp380:p-3 animate-reveal"
-      style={{ animationDelay: delay + "s" }}
-    >
-      <div className="flex items-center gap-[11px]">
-        <div
-          className="bg-elevated rounded-lg animate-skeleton"
-          style={{ width: 28, height: 28, borderRadius: 7 }}
-        />
-        <div className="flex flex-col gap-px min-w-0 flex-1" style={{ gap: 6 }}>
-          <div
-            className="bg-elevated rounded-lg animate-skeleton"
-            style={{ width: 130, height: 12 }}
-          />
-          <div
-            className="bg-elevated rounded-lg animate-skeleton"
-            style={{ width: 50, height: 9 }}
-          />
-        </div>
-        <div
-          className="bg-elevated rounded-lg animate-skeleton"
-          style={{ width: 66, height: 22, borderRadius: 999 }}
-        />
-      </div>
-      <div
-        className="bg-elevated rounded-lg animate-skeleton"
-        style={{ height: 10, borderRadius: 6 }}
-      />
-      <div
-        className="bg-elevated rounded-lg animate-skeleton"
-        style={{ height: 34 }}
-      />
-      <div className="flex flex-wrap gap-1.5">
-        {[44, 60, 50].map((w, i) => (
-          <div
-            className="bg-elevated rounded-lg animate-skeleton"
-            key={i}
-            style={{ width: w, height: 22, borderRadius: 7 }}
-          />
-        ))}
-      </div>
     </div>
   );
 }
@@ -609,7 +615,13 @@ const SUGGEST = [
   "Which holding looks most fragile?",
 ];
 
-function AskBox({ holdings }: { holdings: HoldingRow[] }) {
+function AskBox({
+  holdings,
+  portfolio,
+}: {
+  holdings: HoldingRow[];
+  portfolio: PortfolioContext;
+}) {
   const [q, setQ] = useState("");
   const [ans, setAns] = useState("");
   const [phase, setPhase] = useState<"idle" | "thinking" | "typing" | "done">(
@@ -628,19 +640,20 @@ function AskBox({ holdings }: { holdings: HoldingRow[] }) {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
+    const totalValue = holdings.reduce((s, h) => s + h.valueSGD, 0) || 1;
     const askHoldings = holdings.map((h) => ({
       name: h.name,
       assetType: h.assetType,
       totalPct: h.totalPct,
+      weightPct: (h.valueSGD / totalValue) * 100,
     }));
-    const totalSGD = holdings.reduce((s, h) => s + h.valueSGD, 0);
 
     try {
       let first = true;
       const { text: full, stopReason } = await streamAsk(
         query,
         askHoldings,
-        totalSGD,
+        portfolio,
         (chunk) => {
           if (first) {
             setPhase("typing");
@@ -733,6 +746,30 @@ let SENT_CACHE: { key: string; data: AnalysisData } | null = null;
 const holdingsKey = (holdings: HoldingRow[]) =>
   holdings.map((h) => `${h.ticker}:${h.sparkData.at(-1) ?? 0}`).join("|");
 
+function toPortfolioContext(
+  positions: HoldingRow[],
+  assetAllocation: AllocationSlice[],
+  geoAllocation: AllocationSlice[],
+  currencyCards: CurrencyCard[],
+): PortfolioContext {
+  const totalValueSGD = positions.reduce((s, h) => s + h.valueSGD, 0);
+  const costSGD = positions.reduce((s, h) => s + h.costSGD, 0);
+  const unrealGainPct =
+    costSGD > 0 ? ((totalValueSGD - costSGD) / costSGD) * 100 : 0;
+  const toPct = (arr: AllocationSlice[]) => {
+    const sum = arr.reduce((s, a) => s + a.value, 0) || 1;
+    return arr.map((a) => ({ label: a.label, pct: (a.value / sum) * 100 }));
+  };
+  return {
+    totalValueSGD,
+    costSGD,
+    unrealGainPct,
+    assetAllocation: toPct(assetAllocation),
+    geoAllocation: toPct(geoAllocation),
+    currencyExposure: currencyCards.map((c) => ({ code: c.code, pct: c.exposurePct })),
+  };
+}
+
 function buildFallback(holdings: HoldingRow[]): AnalysisData {
   const items = holdings.map((h, i) => {
     const id = h.ticker !== "—" ? h.ticker : h.assetType + "_" + i;
@@ -754,7 +791,11 @@ function buildFallback(holdings: HoldingRow[]): AnalysisData {
   return { items, overall: FALLBACK_OVERALL, source: "sample" };
 }
 
-async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
+async function runSentimentAI(
+  holdings: HoldingRow[],
+  portfolio: PortfolioContext,
+): Promise<AnalysisData> {
+  const totalValue = holdings.reduce((s, h) => s + h.valueSGD, 0) || 1;
   const assets = holdings.map((h, i) => ({
     id: h.ticker !== "—" ? h.ticker : h.assetType + "_" + i,
     name: h.name,
@@ -762,10 +803,30 @@ async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
     icon: h.icon,
     sparkData: h.sparkData,
     delta: priceDelta(h.sparkData),
+    weightPct: (h.valueSGD / totalValue) * 100,
+    valueSGD: h.valueSGD,
+    costSGD: h.costSGD,
+    unrealPct: h.totalPct,
+    currency: h.currency || "SGD",
+    assetGain: h.assetGain,
+    fxGain: h.fxGain,
   }));
 
   const { text, stopReason } = await streamSentiment(
-    assets.map(({ id, name, type, delta }) => ({ id, name, type, delta })),
+    assets.map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: a.type,
+      delta: a.delta,
+      weightPct: a.weightPct,
+      valueSGD: a.valueSGD,
+      costSGD: a.costSGD,
+      unrealPct: a.unrealPct,
+      currency: a.currency,
+      assetGain: a.assetGain,
+      fxGain: a.fxGain,
+    })),
+    portfolio,
   );
 
   if (stopReason === "max_tokens") {
@@ -817,10 +878,14 @@ async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
 }
 
 export default function AnalysisPage() {
-  const { holdings } = usePortfolio();
+  const { holdings, assetAllocation, geoAllocation, currencyCards } = usePortfolio();
   // One card per instrument: net out sells and collapse multi-lot positions so
   // the same ticker never appears twice.
   const positions = useMemo(() => toNetPositions(holdings), [holdings]);
+  const portfolio = useMemo(
+    () => toPortfolioContext(positions, assetAllocation, geoAllocation, currencyCards),
+    [positions, assetAllocation, geoAllocation, currencyCards],
+  );
   const key = holdingsKey(positions);
   const cached = SENT_CACHE?.key === key ? SENT_CACHE.data : null;
 
@@ -835,11 +900,17 @@ export default function AnalysisPage() {
     // Kick off news pre-fetch for all holdings in parallel with the AI call.
     // This populates HL_CACHE so every SentDrawer opens instantly with fresh
     // headlines instead of fetching one symbol at a time on expand.
-    const ids = positions.map((p) => ({ id: p.id, name: p.name }));
+    // Key by the same ticker-based id the SentDrawers use (never the holding
+    // UUID) so the prefetch actually populates HL_CACHE and the bulk request
+    // sends real tickers, not UUIDs that fail SYMBOL_RE.
+    const ids = positions.map((p, i) => ({
+      id: p.ticker !== "—" ? p.ticker : p.assetType + "_" + i,
+      name: p.name,
+    }));
     prefetchAllNews(ids); // intentionally not awaited — fire and forget
     let res: AnalysisData;
     try {
-      res = await runSentimentAI(positions);
+      res = await runSentimentAI(positions, portfolio);
     } catch (err) {
       console.warn("sentiment AI failed, using sample data:", err);
       res = buildFallback(positions);
@@ -855,7 +926,7 @@ export default function AnalysisPage() {
     (async () => {
       let res: AnalysisData;
       try {
-        res = await runSentimentAI(positions);
+        res = await runSentimentAI(positions, portfolio);
       } catch (err) {
         console.warn("sentiment AI failed, using sample data:", err);
         res = buildFallback(positions);
@@ -910,7 +981,7 @@ export default function AnalysisPage() {
       </div>
 
       <Hero overall={data.overall} items={data.items} />
-      <AskBox holdings={positions} />
+      <AskBox holdings={positions} portfolio={portfolio} />
       {/* Two independent columns (masonry): each flows on its own so expanding
           a card never leaves a gap in the other column. */}
       <div className="flex items-start gap-[18px] max-bp1080:flex-col max-bp768:w-full">

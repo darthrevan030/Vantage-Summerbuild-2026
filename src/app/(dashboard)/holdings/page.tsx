@@ -20,6 +20,15 @@ import { refreshHoldingPrices } from "@/lib/api-client";
 import type { HoldingRow, GroupedHolding, AssetType } from "@/types/holding";
 import { FIXED_INCOME_TYPES } from "@/types/holding";
 import { groupHoldings } from "@/lib/group-holdings";
+import { toCsv } from "@/lib/portfolio-io";
+import type { OpenBuyLot } from "@/lib/realized";
+import type { CostBasisMethod } from "@/types/settings";
+
+const METHOD_LABEL: Record<CostBasisMethod, string> = {
+  fifo: "FIFO",
+  average: "Average",
+  specific: "Specific-lot",
+};
 
 // Day-over-day price move in native currency (currency cancels in the ratio).
 // Returns null when there's no previous close to compare against.
@@ -98,6 +107,8 @@ const STRAT_BASE =
 const TYPES = ["All", "Equity", "ETF", "REIT", "Bond", "T-Bill", "Gold", "RE"] as const;
 const SOURCES = ["All", "CPF", "SRS", "Cash"] as const;
 
+// Used only to derive the SortKey union below (typeof trick) — no runtime reads.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SORT_KEYS = [
   "name",
   "price",
@@ -140,7 +151,7 @@ const LOT_CELL_R = LOT_CELL + " text-right font-mono";
 const LOT_CELL_R_BOLD = LOT_CELL_R + " font-semibold";
 
 function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
-  const { fmtVal, fmtSigned } = usePortfolio();
+  const { fmtSigned, costBasisMethod } = usePortfolio();
   const router = useRouter();
   const d = h.detail;
   const total = h.assetGain + h.fxGain;
@@ -180,6 +191,39 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
     setSellForm((f) => ({ ...f, [k]: v }));
   const canSell = h.ticker !== "—";
 
+  const [methodOverride, setMethodOverride] = useState<CostBasisMethod | null>(
+    null,
+  );
+  const effectiveMethod = methodOverride ?? costBasisMethod;
+  const [openLots, setOpenLots] = useState<OpenBuyLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(false);
+  const [lotAllocations, setLotAllocations] = useState<Record<string, string>>(
+    {},
+  );
+  const allocatedTotal = Object.values(lotAllocations).reduce(
+    (s, v) => s + (Number(v) || 0),
+    0,
+  );
+
+  useEffect(() => {
+    if (mode !== "sell" || effectiveMethod !== "specific" || !canSell) return;
+    let alive = true;
+    // Deferred (like the fetch .then() below) so this isn't a synchronous
+    // setState call within the effect body itself.
+    Promise.resolve().then(() => alive && setLoadingLots(true));
+    fetch(`/api/holdings/open-lots?ticker=${encodeURIComponent(h.ticker)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: OpenBuyLot[]) => {
+        if (alive) setOpenLots(rows);
+      })
+      .finally(() => {
+        if (alive) setLoadingLots(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, effectiveMethod, canSell, h.ticker]);
+
   async function handleSell() {
     setSaving(true);
     try {
@@ -187,6 +231,18 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
       const price = Number(sf.price);
       if (!(units > 0)) throw new Error("Units to sell must be positive");
       if (!(price > 0)) throw new Error("Sale price must be positive");
+
+      let lot_allocations: { buyLotId: string; qty: number }[] | undefined;
+      if (effectiveMethod === "specific") {
+        lot_allocations = Object.entries(lotAllocations)
+          .map(([buyLotId, v]) => ({ buyLotId, qty: Number(v) || 0 }))
+          .filter((a) => a.qty > 0);
+        const allocated = lot_allocations.reduce((s, a) => s + a.qty, 0);
+        if (Math.abs(allocated - units) > 1e-6) {
+          throw new Error("Chosen lot quantities must add up to the units sold");
+        }
+      }
+
       const res = await fetch("/api/holdings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,6 +264,8 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           spark_data: h.sparkData,
           transaction_type: "sell",
           source: h.source,
+          cost_basis_method: effectiveMethod,
+          ...(lot_allocations ? { lot_allocations } : {}),
         }),
       });
       if (!res.ok) {
@@ -528,8 +586,8 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
           </button>
         </div>
         <div className="rounded-[8px] border border-subtle bg-surface px-3 py-2 font-ui text-[11.5px] text-secondary">
-          Records a sell transaction that reduces your net position. Cost basis
-          stays at your average buy price.
+          Records a sell transaction that reduces your net position. Realized
+          gain is matched using your chosen cost-basis method below.
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
@@ -587,6 +645,63 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
             </div>
           )}
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+            Cost-basis method
+          </span>
+          <Select
+            value={METHOD_LABEL[effectiveMethod]}
+            options={Object.values(METHOD_LABEL)}
+            onChange={(v) => {
+              const next = (Object.entries(METHOD_LABEL).find(
+                ([, l]) => l === v,
+              )?.[0] ?? "fifo") as CostBasisMethod;
+              setMethodOverride(next);
+            }}
+          />
+        </div>
+        {effectiveMethod === "specific" && (
+          <div className="flex flex-col gap-1.5 rounded-[8px] border border-subtle bg-surface p-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-muted">
+              Choose lots to close
+            </span>
+            {loadingLots ? (
+              <span className="font-ui text-[11.5px] text-secondary">
+                Loading open lots…
+              </span>
+            ) : openLots.length === 0 ? (
+              <span className="font-ui text-[11.5px] text-secondary">
+                No open lots found.
+              </span>
+            ) : (
+              openLots.map((lot) => (
+                <div key={lot.id} className="flex items-center justify-between gap-2">
+                  <span className="font-ui text-[11.5px] text-secondary">
+                    {lot.tradeDate} · {NF(lot.openQuantity, 4)} open @ {NF(lot.price, 4)}
+                  </span>
+                  <input
+                    className="w-20 rounded-[6px] border border-subtle bg-elevated px-2 py-1 font-mono text-[11.5px] text-primary outline-none focus:border-gold-soft"
+                    type="number"
+                    min="0"
+                    max={lot.openQuantity}
+                    step="any"
+                    placeholder="0"
+                    value={lotAllocations[lot.id] ?? ""}
+                    onChange={(e) =>
+                      setLotAllocations((prev) => ({
+                        ...prev,
+                        [lot.id]: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              ))
+            )}
+            <span className="font-ui text-[11px] text-muted">
+              Allocated: {NF(allocatedTotal, 4)} / {sf.units || "0"}
+            </span>
+          </div>
+        )}
         <button
           className="w-full cursor-pointer rounded-[9px] border-none bg-loss p-[9px] font-ui text-[13px] font-semibold text-white transition-[filter] duration-150 hover:brightness-[1.08] disabled:cursor-not-allowed disabled:opacity-50"
           onClick={handleSell}
@@ -800,8 +915,40 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   );
 }
 
+function Th({
+  k,
+  children,
+  right,
+  sort,
+  onSort,
+}: {
+  k?: SortKey;
+  children: React.ReactNode;
+  right?: boolean;
+  sort?: { k: SortKey; dir: 1 | -1 };
+  onSort?: (k: SortKey) => void;
+}) {
+  return (
+    <th
+      className={
+        "select-none border-b border-subtle px-4 py-3.5 font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted light:border-b-black/[.12] " +
+        (right ? "text-right" : "text-left")
+      }
+      onClick={k && onSort ? () => onSort(k) : undefined}
+      style={{ cursor: k ? "pointer" : "default" }}
+    >
+      {children}
+      {k && (
+        <span className="text-gold text-[11px]">
+          {sort?.k === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}
+        </span>
+      )}
+    </th>
+  );
+}
+
 export default function HoldingsPage() {
-  const { holdings, fmtVal, fmtSigned } = usePortfolio();
+  const { holdings, fmtVal, fmtSigned, closedPositions } = usePortfolio();
   const router = useRouter();
 
   const [q, setQ] = useState("");
@@ -815,6 +962,7 @@ export default function HoldingsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
   const [groupView, setGroupView] = useState(true);
+  const [tab, setTab] = useState<"open" | "closed">("open");
   const [expandedTickers, setExpandedTickers] = useState<Set<string>>(
     new Set(),
   );
@@ -914,7 +1062,8 @@ export default function HoldingsPage() {
   const toggle = (h: HoldingRow) =>
     setPicked((prev) => {
       const next = new Set(prev);
-      next.has(key(h)) ? next.delete(key(h)) : next.add(key(h));
+      if (next.has(key(h))) next.delete(key(h));
+      else next.add(key(h));
       return next;
     });
 
@@ -928,7 +1077,8 @@ export default function HoldingsPage() {
   const toggleGroup = (k: string) =>
     setExpandedTickers((prev) => {
       const next = new Set(prev);
-      next.has(k) ? next.delete(k) : next.add(k);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
 
@@ -989,32 +1139,6 @@ export default function HoldingsPage() {
 
   const compareCards = holdings.filter((h) => picked.has(key(h)));
 
-  const Th = ({
-    k,
-    children,
-    right,
-  }: {
-    k?: SortKey;
-    children: React.ReactNode;
-    right?: boolean;
-  }) => (
-    <th
-      className={
-        "select-none border-b border-subtle px-4 py-3.5 font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted light:border-b-black/[.12] " +
-        (right ? "text-right" : "text-left")
-      }
-      onClick={k ? () => sortBy(k) : undefined}
-      style={{ cursor: k ? "pointer" : "default" }}
-    >
-      {children}
-      {k && (
-        <span className="text-gold text-[11px]">
-          {sort.k === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}
-        </span>
-      )}
-    </th>
-  );
-
   const handleCsvExport = () => {
     const cols = [
       "Name",
@@ -1042,7 +1166,7 @@ export default function HoldingsPage() {
       h.fxGain.toFixed(2),
       h.totalPct.toFixed(2),
     ]);
-    const csv = [cols, ...rowData].map((r) => r.join(",")).join("\n");
+    const csv = toCsv([cols, ...rowData]);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
@@ -1053,6 +1177,33 @@ export default function HoldingsPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-[18px]">
+      <div className="flex gap-1.5 animate-reveal">
+        <button
+          className={
+            "cursor-pointer rounded-lg border px-[15px] py-[7px] font-ui text-[12.5px] transition-all duration-150 " +
+            (tab === "open"
+              ? "border-gold-soft bg-wash text-gold"
+              : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+          }
+          onClick={() => setTab("open")}
+        >
+          Open
+        </button>
+        <button
+          className={
+            "cursor-pointer rounded-lg border px-[15px] py-[7px] font-ui text-[12.5px] transition-all duration-150 " +
+            (tab === "closed"
+              ? "border-gold-soft bg-wash text-gold"
+              : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")
+          }
+          onClick={() => setTab("closed")}
+        >
+          Closed{closedPositions.length > 0 ? ` (${closedPositions.length})` : ""}
+        </button>
+      </div>
+
+      {tab === "open" && (
+        <>
       {/* filter bar */}
       <div className="flex flex-wrap items-center gap-3 max-bp768:gap-2 max-bp600:flex-col max-bp600:items-stretch animate-reveal">
         <div className="flex flex-1 items-center gap-[9px] rounded-[10px] border border-subtle bg-surface px-[13px] py-[9px] text-muted min-w-[220px] max-bp600:w-full max-bp600:min-w-0">
@@ -1186,40 +1337,40 @@ export default function HoldingsPage() {
         <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
           <thead>
             <tr>
-              <Th k="name">Name / Ticker</Th>
-              <Th>Type</Th>
-              <Th>Broker</Th>
-              <Th>Strategy</Th>
-              <Th k="source">Source</Th>
-              <Th k="units" right>
+              <Th k="name" sort={sort} onSort={sortBy}>Name / Ticker</Th>
+              <Th sort={sort} onSort={sortBy}>Type</Th>
+              <Th sort={sort} onSort={sortBy}>Broker</Th>
+              <Th sort={sort} onSort={sortBy}>Strategy</Th>
+              <Th k="source" sort={sort} onSort={sortBy}>Source</Th>
+              <Th k="units" right sort={sort} onSort={sortBy}>
                 Units
               </Th>
-              <Th k="price" right>
+              <Th k="price" right sort={sort} onSort={sortBy}>
                 Price
               </Th>
-              <Th k="cost" right>
+              <Th k="cost" right sort={sort} onSort={sortBy}>
                 Cost
               </Th>
-              <Th k="dayPct" right>
+              <Th k="dayPct" right sort={sort} onSort={sortBy}>
                 Day %
               </Th>
-              <Th k="yield" right>
+              <Th k="yield" right sort={sort} onSort={sortBy}>
                 Yield
               </Th>
-              {hasFixedIncome && <Th right>Maturity</Th>}
-              <Th k="valueSGD" right>
+              {hasFixedIncome && <Th right sort={sort} onSort={sortBy}>Maturity</Th>}
+              <Th k="valueSGD" right sort={sort} onSort={sortBy}>
                 Value
               </Th>
-              <Th k="assetGain" right>
+              <Th k="assetGain" right sort={sort} onSort={sortBy}>
                 Asset Gain
               </Th>
-              <Th k="fxGain" right>
+              <Th k="fxGain" right sort={sort} onSort={sortBy}>
                 FX
               </Th>
-              <Th k="totalPct" right>
+              <Th k="totalPct" right sort={sort} onSort={sortBy}>
                 Total %
               </Th>
-              <Th>CCY</Th>
+              <Th sort={sort} onSort={sortBy}>CCY</Th>
             </tr>
           </thead>
           <tbody>
@@ -1790,6 +1941,98 @@ export default function HoldingsPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {tab === "closed" && (
+        <div className="card p-0 overflow-x-auto overflow-y-hidden max-bp768:overflow-y-visible animate-reveal">
+          <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
+            <thead>
+              <tr>
+                <Th sort={sort} onSort={sortBy}>Name / Ticker</Th>
+                <Th sort={sort} onSort={sortBy}>Type</Th>
+                <Th right sort={sort} onSort={sortBy}>Units Sold</Th>
+                <Th right sort={sort} onSort={sortBy}>Asset Gain</Th>
+                <Th right sort={sort} onSort={sortBy}>FX Gain</Th>
+                <Th right sort={sort} onSort={sortBy}>Realized Gain</Th>
+                <Th sort={sort} onSort={sortBy}>Last Sale</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {closedPositions.map((p) => (
+                <tr key={p.ticker}>
+                  <td className="px-3.5 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Icon
+                        name={p.icon as never}
+                        size={15}
+                        style={{ color: "var(--gold)" }}
+                      />
+                      <div className="flex flex-col">
+                        <span className="font-ui text-[13px] text-primary">
+                          {p.name}
+                        </span>
+                        <span className="font-mono text-[11px] text-secondary">
+                          {p.ticker}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3.5 py-2.5 font-ui text-[12.5px] text-secondary">
+                    {p.assetType}
+                  </td>
+                  <td className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums">
+                    {NF(p.totalQuantitySold, 4)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums"
+                    style={{
+                      color: p.assetGainSgd >= 0 ? "var(--gain)" : "var(--loss)",
+                    }}
+                  >
+                    {fmtSigned(p.assetGainSgd)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] tabular-nums"
+                    style={{
+                      color:
+                        p.fxGainSgd >= 0
+                          ? "var(--fx-positive)"
+                          : "var(--fx-negative)",
+                    }}
+                  >
+                    {fmtSigned(p.fxGainSgd)}
+                  </td>
+                  <td
+                    className="px-3.5 py-2.5 text-right font-mono text-[12.5px] font-semibold tabular-nums"
+                    style={{
+                      color: p.realizedGainSgd >= 0 ? "var(--gain)" : "var(--loss)",
+                    }}
+                  >
+                    {fmtSigned(p.realizedGainSgd)}
+                  </td>
+                  <td className="px-3.5 py-2.5 font-ui text-[12.5px] text-secondary">
+                    {p.lastSaleDate}
+                  </td>
+                </tr>
+              ))}
+              {closedPositions.length === 0 && (
+                <tr>
+                  <td
+                    className="text-[13px]"
+                    colSpan={7}
+                    style={{ textAlign: "center", padding: "32px 0" }}
+                  >
+                    <span className="font-ui text-secondary">
+                      No closed positions yet.
+                    </span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

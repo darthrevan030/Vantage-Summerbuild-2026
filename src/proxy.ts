@@ -104,8 +104,12 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/login") || pathname.startsWith("/auth");
   // The marketing landing page is public for signed-out visitors only.
   const isLanding = pathname === "/";
+  // Internal service routes (e.g. the scheduled snapshot cron) authenticate via
+  // a shared secret inside the route handler, not a user session — exempt them
+  // from the login redirect so the caller reaches the route's own guard.
+  const isInternalApi = pathname.startsWith("/api/internal/");
 
-  if (!user && !isAuthPath && !isLanding) {
+  if (!user && !isAuthPath && !isLanding && !isInternalApi) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     const redirect = NextResponse.redirect(url);

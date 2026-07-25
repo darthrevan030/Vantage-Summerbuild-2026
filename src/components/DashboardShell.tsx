@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
+import { DailyAutoRefresh } from "@/components/DailyAutoRefresh";
 import { NerveBar } from "@/components/NerveBar";
 import { TabBar } from "@/components/TabBar";
 import { SummaryRail } from "@/components/SummaryRail";
 import { TweaksPanel } from "@/components/TweaksPanel";
 import { PortfolioProvider } from "@/context/portfolio";
 import type { HoldingRow } from "@/types/holding";
+import type { ClosedPosition } from "@/types/realized";
+import type { CostBasisMethod } from "@/types/settings";
 import type {
   HeroStats,
   AllocationSlice,
@@ -21,6 +24,7 @@ import type {
 interface DashboardShellProps {
   holdings: HoldingRow[];
   hero: HeroStats;
+  closedPositions: ClosedPosition[];
   assetAllocation: AllocationSlice[];
   geoAllocation: AllocationSlice[];
   movers: { gainers: MoverItem[]; losers: MoverItem[] };
@@ -35,12 +39,16 @@ interface DashboardShellProps {
   initialDisplayName: string;
   initialBaseCurrency: string;
   initialRole: string;
+  initialCostBasisMethod: CostBasisMethod;
+  initialTrackCash: boolean;
+  staleToday: boolean;
   children: React.ReactNode;
 }
 
 export function DashboardShell({
   holdings,
   hero,
+  closedPositions,
   assetAllocation,
   geoAllocation,
   movers,
@@ -55,6 +63,9 @@ export function DashboardShell({
   initialDisplayName,
   initialBaseCurrency,
   initialRole,
+  initialCostBasisMethod,
+  initialTrackCash,
+  staleToday,
   children,
 }: DashboardShellProps) {
   const [tweaksOpen, setTweaksOpen] = useState(false);
@@ -67,6 +78,7 @@ export function DashboardShell({
       value={{
         holdings,
         hero,
+        closedPositions,
         assetAllocation,
         geoAllocation,
         movers,
@@ -81,9 +93,12 @@ export function DashboardShell({
         initialDisplayName,
         initialBaseCurrency,
         initialRole,
+        initialCostBasisMethod,
+        initialTrackCash,
       }}
     >
       <div className="flex min-h-screen flex-col">
+        <DailyAutoRefresh trigger={staleToday} />
         <NerveBar
           hero={hero}
           animate

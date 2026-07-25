@@ -25,7 +25,9 @@ export function useFxSparks(
     if (missing.length === 0) {
       const result: Record<string, number[]> = {};
       for (const c of codes) result[c] = SPARK_CACHE[`${c}_${base}`] ?? [];
-      setSparks(result);
+      // Deferred (like the fetch branch below) so the update isn't a
+      // synchronous setState call within the effect body itself.
+      Promise.resolve().then(() => setSparks(result));
       return;
     }
 

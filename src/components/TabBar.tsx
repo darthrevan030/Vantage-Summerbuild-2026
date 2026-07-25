@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { refreshHoldingPrices } from "@/lib/api-client";
-import { usePortfolio } from "@/context/portfolio";
 import { SPRING_SMOOTH } from "@/components/landing/motion-config";
 
 const TABS = [
@@ -51,11 +50,12 @@ export function TabBar({
   const pathname = usePathname();
   const router = useRouter();
   const reduce = useReducedMotion();
-  const { displayName } = usePortfolio();
 
-  // Close drawer on route change
+  // Close drawer on route change only — deliberately excludes onMobileClose
+  // so a new callback identity from the parent doesn't also trigger a close.
   useEffect(() => {
     onMobileClose?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   // Shared sliding underline — only the active tab mounts it; the layoutId

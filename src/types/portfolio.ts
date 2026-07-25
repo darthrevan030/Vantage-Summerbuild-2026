@@ -2,8 +2,10 @@ export interface HeroStats {
   total: number;
   dayChange: number;
   dayPct: number;
-  totalGain: number;
-  totalGainPct: number;
+  unrealizedGain: number;
+  unrealizedGainPct: number;
+  realizedGain: number;
+  realizedGainPct: number;
   fxImpact: number;
   fxPct: number;
   neutral: number;
@@ -75,6 +77,9 @@ export interface PortfolioAnalytics {
   worstDayDate: string;
   days: number;
   series: { date: string; value: number; cost: number }[];
+  xirr: number;
+  xirrByBroker: { broker: string; xirr: number }[];
+  xirrBySource: { source: string; xirr: number }[];
 }
 
 export interface CashBalance {

@@ -27,6 +27,7 @@ function netAggregate(lots: HoldingRow[]): NetAgg {
   let sellUnits = 0;
   let pxWeighted = 0;
   let fxWeighted = 0;
+  let buyFeesTotal = 0;
   let curPx = 0;
   let curFx = 1;
 
@@ -37,6 +38,7 @@ function netAggregate(lots: HoldingRow[]): NetAgg {
       buyUnits += l.units;
       pxWeighted += l.units * l.buyPrice;
       fxWeighted += l.units * l.buyFxRate;
+      buyFeesTotal += l.fees;
       // Same instrument across the group → same live quote/FX.
       curPx = l.currentPrice;
       curFx = l.currentFxRate;
@@ -62,10 +64,12 @@ function netAggregate(lots: HoldingRow[]): NetAgg {
 
   const avgBuyPx = pxWeighted / buyUnits;
   const avgBuyFx = fxWeighted / buyUnits;
+  const avgFeePerUnit = buyFeesTotal / buyUnits;
   const netUnits = Math.max(buyUnits - sellUnits, 0);
-  const costSGD = netUnits * avgBuyPx * avgBuyFx;
+  const costSGD = netUnits * (avgBuyPx + avgFeePerUnit) * avgBuyFx;
   const valueSGD = netUnits * curPx * curFx;
-  const assetGain = netUnits * (curPx - avgBuyPx) * curFx;
+  const assetGain =
+    netUnits * (curPx - avgBuyPx) * curFx - netUnits * avgFeePerUnit * avgBuyFx;
   const fxGain = netUnits * avgBuyPx * (curFx - avgBuyFx);
   const totalPct = costSGD > 0 ? ((valueSGD - costSGD) / costSGD) * 100 : 0;
 

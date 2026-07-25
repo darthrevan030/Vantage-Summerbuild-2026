@@ -9,6 +9,16 @@ import { toast } from "sonner";
 import { useCurrencies } from "@/hooks/useCurrencies";
 import { useExchanges } from "@/hooks/useExchanges";
 import type { ParsedTrade } from "@/lib/pdf-parsers";
+import {
+  parseCsv,
+  parseCsvNumber,
+  CSV_FIELD_MAP,
+  csvHeaderKey,
+  holdingsToImportCsv,
+  parseBackup,
+  type CsvRow,
+  type BackupEnvelope,
+} from "@/lib/portfolio-io";
 
 const ASSET_TYPES = ["Equity", "ETF", "REIT", "Gold", "RE", "Bond", "T-Bill"];
 
@@ -68,65 +78,6 @@ function Field({
   );
 }
 
-interface CsvRow {
-  [key: string]: string;
-}
-
-// Lowercased keys — headers are normalized (trim + toLowerCase) before lookup
-// so "Units", "units", " UNITS " all resolve to the same target.
-const CSV_FIELD_MAP: Record<string, string> = {
-  "name": "name",
-  "asset name": "name",
-  "stock name": "name",
-  "ticker": "ticker",
-  "symbol": "ticker",
-  "asset type": "asset_type",
-  "type": "asset_type",
-  "strategy": "strategy",
-  "broker": "broker",
-  "units": "units",
-  "qty": "units",
-  "quantity": "units",
-  "shares": "units",
-  "no. of shares": "units",
-  "nominal": "units",
-  "currency": "currency",
-  "ccy": "currency",
-  "purchase price": "buy_price",
-  "buy price": "buy_price",
-  "price": "buy_price",
-  "avg price": "buy_price",
-  "cost basis": "buy_price",
-  "purchase date": "buy_date",
-  "date bought": "buy_date",
-  "date": "buy_date",
-  "trade date": "buy_date",
-  "fx rate": "buy_fx_rate",
-  "purchase fx rate": "buy_fx_rate",
-};
-
-const csvHeaderKey = (h: string) => h.trim().toLowerCase();
-
-function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
-  const lines = text.trim().split("\n");
-  const headers = lines[0]
-    .split(",")
-    .map((h) => h.trim().replace(/^"|"$/g, ""));
-  const rows = lines.slice(1).map((line) => {
-    const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
-  });
-  return { headers, rows };
-}
-
-// parseFloat("1,000") stops at the comma and returns 1 — a silent data-loss
-// bug when broker CSVs use thousands separators. Strip anything that isn't
-// numeric before parsing.
-function parseCsvNumber(v: string | undefined): number {
-  if (v == null) return NaN;
-  const cleaned = String(v).replace(/[^\d.\-eE+]/g, "");
-  return cleaned === "" ? NaN : parseFloat(cleaned);
-}
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -244,74 +195,209 @@ function CpfForm() {
   );
 }
 
+const CASH_TYPE_LABEL: Record<string, string> = {
+  deposit: "Deposit",
+  withdrawal: "Withdrawal",
+  transfer: "Transfer",
+  fee: "Fee",
+  dividend_cash: "Dividend cash",
+};
+
 function CashForm() {
   const router = useRouter();
   const currencies = useCurrencies();
-  const [existing, setExisting] = useState<{ currency: string; amount: number }[]>([]);
+  const [transactions, setTransactions] = useState<
+    { id: string; lotId: string | null; date: string; type: string; currency: string; amount: number; broker: string; note: string | null }[]
+  >([]);
+  const [type, setType] = useState("deposit");
   const [currency, setCurrency] = useState("SGD");
   const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(TODAY);
+  const [broker, setBroker] = useState("");
+  const [toBroker, setToBroker] = useState("");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const load = () =>
-    fetch("/api/cash").then((r) => (r.ok ? r.json() : [])).then((rows) => setExisting(Array.isArray(rows) ? rows : [])).catch(() => {});
-  useEffect(() => { load(); }, []);
-
-  const pickCurrency = (c: string) => {
-    setCurrency(c);
-    const ex = existing.find((r) => r.currency === c);
-    setAmount(ex ? String(ex.amount) : "");
-  };
+    fetch("/api/cash/transactions")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setTransactions(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleSubmit = async () => {
     setError("");
     const amt = parseFloat(amount);
-    if (isNaN(amt) || amt < 0) { const msg = "Amount must be zero or positive."; setError(msg); toast.error(msg); return; }
+    if (isNaN(amt) || amt <= 0) {
+      const msg = "Amount must be positive.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    if (type === "transfer" && !toBroker.trim()) {
+      const msg = "Destination broker is required for a transfer.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/cash", {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currency, amount: amt }),
+        body: JSON.stringify({
+          type,
+          currency,
+          amount: amt,
+          date,
+          broker,
+          to_broker: type === "transfer" ? toBroker : undefined,
+          note: note || null,
+        }),
       });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as { error?: string }).error ?? "Save failed"); }
-      toast.success(`${currency} cash balance saved`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Save failed");
+      }
+      toast.success(`${CASH_TYPE_LABEL[type]} logged`);
       setAmount("");
+      setNote("");
+      setToBroker("");
       await load();
       router.refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Save failed";
-      setError(msg); toast.error(msg);
-    } finally { setSaving(false); }
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/cash?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error((e as { error?: string }).error ?? "Delete failed");
+      }
+      toast.success("Entry removed");
+      await load();
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    }
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
-      <Field label="Currency">
-        <Select value={CCY_FLAGS[currency] + " " + currency}
-          options={currencies.map((c) => (CCY_FLAGS[c] ?? "🌐") + " " + c)}
-          onChange={(v) => pickCurrency(v.split(" ")[1])} />
-      </Field>
-      <Field label="Amount">
-        <input className="inp" type="number" min="0" step="any" placeholder="10000"
-          value={amount} onChange={(e) => setAmount(e.target.value)} />
-      </Field>
-      {existing.length > 0 && (
-        <div className="col-span-full flex flex-wrap gap-2">
-          {existing.map((c) => (
-            <span key={c.currency} className="flex items-center gap-1.5 rounded-[9px] border border-subtle bg-elevated px-2.5 py-1.5 font-mono text-[12px] text-secondary">
-              {c.currency} {c.amount.toLocaleString()}
-            </span>
+    <div className="flex flex-col gap-3.5">
+      <div className="grid grid-cols-2 gap-3.5 max-bp768:grid-cols-1">
+        <Field label="Type">
+          <Select
+            value={CASH_TYPE_LABEL[type]}
+            options={Object.values(CASH_TYPE_LABEL)}
+            onChange={(v) => {
+              const next = Object.entries(CASH_TYPE_LABEL).find(([, l]) => l === v)?.[0];
+              if (next) setType(next);
+            }}
+          />
+        </Field>
+        <Field label="Currency">
+          <Select
+            value={(CCY_FLAGS[currency] ?? "🌐") + " " + currency}
+            options={currencies.map((c) => (CCY_FLAGS[c] ?? "🌐") + " " + c)}
+            onChange={(v) => setCurrency(v.split(" ")[1])}
+          />
+        </Field>
+        <Field label="Amount">
+          <input
+            className="inp"
+            type="number"
+            min="0"
+            step="any"
+            placeholder="1000"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </Field>
+        <Field label="Date">
+          <input
+            className="inp"
+            type="date"
+            max={TODAY}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </Field>
+        <Field label={type === "transfer" ? "From broker" : "Broker"}>
+          <input
+            className="inp"
+            placeholder="e.g. IBKR"
+            value={broker}
+            onChange={(e) => setBroker(e.target.value)}
+          />
+        </Field>
+        {type === "transfer" && (
+          <Field label="To broker">
+            <input
+              className="inp"
+              placeholder="e.g. Tiger"
+              value={toBroker}
+              onChange={(e) => setToBroker(e.target.value)}
+            />
+          </Field>
+        )}
+        <Field label="Note (optional)" full>
+          <input
+            className="inp"
+            placeholder="optional"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
+      </div>
+      {error && (
+        <div className="font-ui" style={{ color: "var(--loss)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+      <button
+        className="flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+        onClick={handleSubmit}
+        disabled={saving}
+      >
+        <Icon name="plus" size={16} />
+        {saving ? "Saving…" : `Log ${CASH_TYPE_LABEL[type]}`}
+      </button>
+      {transactions.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {transactions.slice(0, 8).map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-2 rounded-[9px] border border-subtle bg-elevated px-2.5 py-1.5"
+            >
+              <span className="font-ui text-[11.5px] text-secondary">
+                {t.date} · {CASH_TYPE_LABEL[t.type] ?? t.type} · {t.currency}{" "}
+                {t.amount.toLocaleString()}
+                {t.broker ? ` · ${t.broker}` : ""}
+              </span>
+              {t.lotId ? (
+                <span className="font-ui text-[10.5px] text-muted">auto</span>
+              ) : (
+                <button
+                  className="cursor-pointer rounded-[5px] border-none bg-transparent p-0.5 text-muted transition-[color] duration-150 hover:text-loss"
+                  onClick={() => handleDelete(t.id)}
+                >
+                  <Icon name="x" size={13} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
-      {error && <div className="font-ui" style={{ color: "var(--loss)", gridColumn: "1 / -1", fontSize: 12 }}>{error}</div>}
-      <button
-        className="col-span-full mt-1 flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
-        onClick={handleSubmit} disabled={saving}>
-        <Icon name="plus" size={16} />
-        {saving ? "Saving…" : "Save Cash Balance"}
-      </button>
     </div>
   );
 }
@@ -324,7 +410,7 @@ const ENTRY_TYPES: [string, string][] = [
 const ENTRY_SUBTITLE: Record<string, string> = {
   holding: "add a position",
   cpf: "update CPF balances",
-  cash: "update cash balances",
+  cash: "log a cash transaction",
 };
 
 function ManualForm() {
@@ -558,13 +644,101 @@ function ManualForm() {
 function ImportPanel() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [importMode, setImportMode] = useState<"csv" | "pdf">("csv");
+  const [importMode, setImportMode] = useState<"csv" | "json" | "pdf">("csv");
   const [drag, setDrag] = useState(false);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<CsvRow[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState("");
+
+  const downloadJsonBackup = async () => {
+    const res = await fetch("/api/holdings/backup");
+    if (!res.ok) {
+      toast.error("Export failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadCsv = async () => {
+    const res = await fetch("/api/holdings");
+    if (!res.ok) {
+      toast.error("Export failed");
+      return;
+    }
+    const holdings = await res.json();
+    const csv = holdingsToImportCsv(holdings);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-holdings.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const jsonFileRef = useRef<HTMLInputElement>(null);
+  const [jsonEnv, setJsonEnv] = useState<BackupEnvelope | null>(null);
+  const [restoreMode, setRestoreMode] = useState<"append" | "replace">("append");
+  const [replaceConfirm, setReplaceConfirm] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState("");
+
+  const handleJsonFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const env = parseBackup((e.target?.result as string) ?? "");
+        setJsonEnv(env);
+        setRestoreResult("");
+      } catch (err) {
+        setJsonEnv(null);
+        toast.error(err instanceof Error ? err.message : "Invalid backup file");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleRestore = async () => {
+    if (!jsonEnv) return;
+    if (restoreMode === "replace" && replaceConfirm !== "REPLACE") return;
+    setRestoring(true);
+    setRestoreResult("");
+    try {
+      const res = await fetch("/api/holdings/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ envelope: jsonEnv, mode: restoreMode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Restore failed");
+        setRestoring(false);
+        return;
+      }
+      const summary = `Restored ${data.restored}${data.failed ? ` · ${data.failed} failed` : ""}.`;
+      setRestoreResult(summary);
+      if (data.failed) toast.warning(summary);
+      else toast.success(summary);
+      router.refresh();
+    } catch {
+      toast.error("Restore failed");
+    }
+    setRestoring(false);
+  };
+
+  const jsonCounts = jsonEnv
+    ? {
+        buys: jsonEnv.lots.filter((l) => l.transactionType !== "sell").length,
+        sells: jsonEnv.lots.filter((l) => l.transactionType === "sell").length,
+      }
+    : null;
 
   const handleFile = (file: File) => {
     if (!file) return;
@@ -694,7 +868,7 @@ function ImportPanel() {
       <div className="flex items-center justify-between mb-4 max-bp600:flex-wrap max-bp600:gap-2">
         <span className="text-[13px] font-semibold text-primary tracking-[.01em]">Import &amp; Backup</span>
         <div className="flex gap-1.5">
-          {(["csv", "pdf"] as const).map((mode) => (
+          {(["csv", "json", "pdf"] as const).map((mode) => (
             <button key={mode}
               className={"cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] uppercase tracking-[.06em] transition-all duration-150 " + (importMode === mode ? "border-gold-soft bg-wash text-gold" : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")}
               onClick={() => setImportMode(mode)}>
@@ -756,18 +930,84 @@ function ImportPanel() {
           <div className="flex gap-3 mt-5">
             <button
               className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
-              onClick={() => {
-                fetch("/api/holdings").then((r) => r.json()).then((data) => {
-                  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-                  const a = document.createElement("a"); a.href = url; a.download = "portfolio-backup.json"; a.click(); URL.revokeObjectURL(url);
-                });
-              }}>
+              onClick={downloadJsonBackup}>
               <Icon name="download" size={15} />
               Export JSON
             </button>
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadCsv}>
+              <Icon name="download" size={15} />
+              Export CSV
+            </button>
           </div>
           <div className="font-ui text-secondary text-[11px] tracking-[.04em] text-center mt-3">
-            Your data is stored in Supabase — export anytime to keep a local copy.
+            JSON is a full backup (restore on the JSON tab). CSV holds buy lots only.
+          </div>
+        </>
+      )}
+
+      {importMode === "json" && (
+        <>
+          <input ref={jsonFileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+            onChange={(e) => { if (e.target.files?.[0]) handleJsonFile(e.target.files[0]); }} />
+          <div
+            className="flex flex-col items-center gap-[7px] text-center border-[1.5px] border-dashed rounded-[13px] cursor-pointer px-5 py-[30px] bg-surface border-gold-soft hover:bg-elevated hover:border-gold [transition:background_.2s,border-color_.2s]"
+            onClick={() => jsonFileRef.current?.click()}>
+            <Icon name="upload" size={26} style={{ color: "var(--gold)" }} />
+            <div className="font-ui text-[14px] font-semibold mt-1">Drop a portfolio-backup.json</div>
+            <div className="font-ui text-secondary">or click to browse</div>
+            <div className="font-ui text-secondary text-[11px] tracking-[.04em] mt-2">Full restore — buys, sells &amp; realized P&amp;L</div>
+          </div>
+
+          {jsonEnv && jsonCounts && (
+            <div className="mt-[18px] flex flex-col gap-3">
+              <div className="font-ui text-[13px] text-primary">
+                {jsonCounts.buys} buy{jsonCounts.buys !== 1 ? "s" : ""}, {jsonCounts.sells} sell{jsonCounts.sells !== 1 ? "s" : ""} in this backup.
+              </div>
+              <div className="flex gap-1.5">
+                {(["append", "replace"] as const).map((m) => (
+                  <button key={m}
+                    className={"cursor-pointer rounded-lg border px-[11px] py-[5px] font-ui text-[11px] uppercase tracking-[.06em] transition-all duration-150 " + (restoreMode === m ? "border-gold-soft bg-wash text-gold" : "border-subtle bg-surface text-secondary hover:border-muted hover:text-primary")}
+                    onClick={() => setRestoreMode(m)}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="font-ui text-secondary text-[11.5px]">
+                {restoreMode === "append"
+                  ? "Adds these lots on top of your current holdings (may duplicate)."
+                  : "Deletes all current holdings first, then restores this backup."}
+              </div>
+              {restoreMode === "replace" && (
+                <input type="text" value={replaceConfirm} onChange={(e) => setReplaceConfirm(e.target.value)}
+                  placeholder="Type REPLACE to confirm"
+                  className="rounded-[9px] border border-subtle bg-surface px-3 py-2 font-ui text-[13px] text-primary outline-none focus:border-gold-soft" />
+              )}
+              {restoreResult && <div className="font-ui text-[12.5px]" style={{ color: "var(--gain)" }}>{restoreResult}</div>}
+              <button
+                className="flex items-center justify-center gap-2 cursor-pointer rounded-[10px] bg-gold p-[13px] font-ui text-[13.5px] font-semibold text-[#15130c] [transition:filter_.15s,transform_.1s] hover:brightness-[1.08] active:translate-y-px disabled:opacity-60 disabled:saturate-[.7] disabled:cursor-default"
+                onClick={handleRestore}
+                disabled={restoring || (restoreMode === "replace" && replaceConfirm !== "REPLACE")}>
+                <Icon name="upload" size={15} />
+                {restoring ? "Restoring…" : restoreMode === "replace" ? "Replace & restore" : "Restore"}
+              </button>
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-5">
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadJsonBackup}>
+              <Icon name="download" size={15} />
+              Export JSON
+            </button>
+            <button
+              className="flex flex-1 items-center justify-center gap-[7px] cursor-pointer rounded-[9px] border border-subtle p-[11px] font-ui text-[12.5px] text-secondary transition-all duration-150 hover:border-gold-soft hover:text-primary light:border-black/[.12]"
+              onClick={downloadCsv}>
+              <Icon name="download" size={15} />
+              Export CSV
+            </button>
           </div>
         </>
       )}
