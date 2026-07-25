@@ -298,10 +298,9 @@ function FXImpactCard() {
   } | null>(null);
 
   useEffect(() => {
-    if (baseCurrency === "SGD") {
-      setBaseSeries(null);
-      return;
-    }
+    // `useBase` below already gates on baseCurrency !== "SGD", so a stale
+    // baseSeries left in state while back on SGD is inert — no reset needed.
+    if (baseCurrency === "SGD") return;
     let cancelled = false;
     fetch(`/api/portfolio/fx-series?base=${baseCurrency}`)
       .then((r) => r.json())

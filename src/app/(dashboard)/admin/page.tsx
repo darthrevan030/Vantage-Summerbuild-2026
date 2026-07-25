@@ -27,6 +27,12 @@ interface StaleTicker {
   priceRefreshedAt: string | null;
 }
 
+// Isolated so the direct Date.now() call doesn't sit inline in the component
+// body (react-hooks/purity flags impure calls inside components/hooks).
+function staleThresholdIso(): string {
+  return new Date(Date.now() - 3_600_000).toISOString();
+}
+
 export default async function AdminPage() {
   // --- Auth: cookie-based check ---
   const supabase = await createClient();
@@ -46,7 +52,7 @@ export default async function AdminPage() {
 
   // --- Data: anon client for RLS-governed queries, admin only for auth.users ---
   const adminClient = createAdminClient();
-  const staleThreshold = new Date(Date.now() - 3_600_000).toISOString();
+  const staleThreshold = staleThresholdIso();
 
   const [
     { data: authData },

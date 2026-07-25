@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { DM_Serif_Display, JetBrains_Mono, Sora } from "next/font/google";
 import "./globals.css";
 import { headers } from "next/headers";
+import Script from "next/script";
 
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -58,7 +59,7 @@ export default async function RootLayout({
       className={`${dmSerif.variable} ${jetbrainsMono.variable} ${sora.variable}`}
     >
       <head>
-        <script src="/theme-init.js" nonce={nonce} />
+        <Script src="/theme-init.js" strategy="beforeInteractive" nonce={nonce} />
       </head>
       <body>
         {children}

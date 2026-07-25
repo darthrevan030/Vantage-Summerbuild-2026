@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated vitest coverage output — never source.
+    "coverage/**",
+    // remember plugin scratch directory — not source.
+    ".remember/**",
+    // Old .jsx mockups — prototype leftovers, nothing in src/ imports them (see AGENTS.md).
+    "design/**",
   ]),
 ]);
 

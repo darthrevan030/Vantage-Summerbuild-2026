@@ -1,18 +1,11 @@
 // lib/api-client.ts
 // Typed client for /api/analyst. Parses SSE with JSON envelopes:
 //   {type:"text",text} | {type:"done",stopReason} | {type:"error"}
-
-export interface SentimentAsset {
-  id: string;
-  name: string;
-  type: string;
-  delta: number | null;
-}
-export interface AskHolding {
-  name: string;
-  assetType: string;
-  totalPct: number;
-}
+import type {
+  SentimentAsset,
+  AskHolding,
+  PortfolioContext,
+} from "@/lib/analyst/prompts";
 
 export interface StreamResult {
   text: string;
@@ -20,8 +13,13 @@ export interface StreamResult {
 }
 
 type AnalystBody =
-  | { mode: "sentiment"; assets: SentimentAsset[] }
-  | { mode: "ask"; question: string; holdings: AskHolding[]; totalSGD: number };
+  | { mode: "sentiment"; assets: SentimentAsset[]; portfolio: PortfolioContext }
+  | {
+      mode: "ask";
+      question: string;
+      holdings: AskHolding[];
+      portfolio: PortfolioContext;
+    };
 
 async function streamAnalyst(
   body: AnalystBody,
@@ -86,22 +84,19 @@ async function streamAnalyst(
 /** Sentiment scan: accumulates the full JSON response. */
 export function streamSentiment(
   assets: SentimentAsset[],
+  portfolio: PortfolioContext,
   signal?: AbortSignal,
 ): Promise<StreamResult> {
-  return streamAnalyst({ mode: "sentiment", assets }, undefined, signal);
+  return streamAnalyst({ mode: "sentiment", assets, portfolio }, undefined, signal);
 }
 
 /** Ask-the-analyst: streams chunks live via onText. */
 export function streamAsk(
   question: string,
   holdings: AskHolding[],
-  totalSGD: number,
+  portfolio: PortfolioContext,
   onText: (chunk: string) => void,
   signal?: AbortSignal,
 ): Promise<StreamResult> {
-  return streamAnalyst(
-    { mode: "ask", question, holdings, totalSGD },
-    onText,
-    signal,
-  );
+  return streamAnalyst({ mode: "ask", question, holdings, portfolio }, onText, signal);
 }

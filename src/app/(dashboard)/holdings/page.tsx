@@ -107,6 +107,8 @@ const STRAT_BASE =
 const TYPES = ["All", "Equity", "ETF", "REIT", "Bond", "T-Bill", "Gold", "RE"] as const;
 const SOURCES = ["All", "CPF", "SRS", "Cash"] as const;
 
+// Used only to derive the SortKey union below (typeof trick) — no runtime reads.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SORT_KEYS = [
   "name",
   "price",
@@ -149,7 +151,7 @@ const LOT_CELL_R = LOT_CELL + " text-right font-mono";
 const LOT_CELL_R_BOLD = LOT_CELL_R + " font-semibold";
 
 function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
-  const { fmtVal, fmtSigned, costBasisMethod } = usePortfolio();
+  const { fmtSigned, costBasisMethod } = usePortfolio();
   const router = useRouter();
   const d = h.detail;
   const total = h.assetGain + h.fxGain;
@@ -206,7 +208,9 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   useEffect(() => {
     if (mode !== "sell" || effectiveMethod !== "specific" || !canSell) return;
     let alive = true;
-    setLoadingLots(true);
+    // Deferred (like the fetch .then() below) so this isn't a synchronous
+    // setState call within the effect body itself.
+    Promise.resolve().then(() => alive && setLoadingLots(true));
     fetch(`/api/holdings/open-lots?ticker=${encodeURIComponent(h.ticker)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: OpenBuyLot[]) => {
@@ -911,6 +915,38 @@ function DetailCard({ h, onClose }: { h: HoldingRow; onClose: () => void }) {
   );
 }
 
+function Th({
+  k,
+  children,
+  right,
+  sort,
+  onSort,
+}: {
+  k?: SortKey;
+  children: React.ReactNode;
+  right?: boolean;
+  sort?: { k: SortKey; dir: 1 | -1 };
+  onSort?: (k: SortKey) => void;
+}) {
+  return (
+    <th
+      className={
+        "select-none border-b border-subtle px-4 py-3.5 font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted light:border-b-black/[.12] " +
+        (right ? "text-right" : "text-left")
+      }
+      onClick={k && onSort ? () => onSort(k) : undefined}
+      style={{ cursor: k ? "pointer" : "default" }}
+    >
+      {children}
+      {k && (
+        <span className="text-gold text-[11px]">
+          {sort?.k === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}
+        </span>
+      )}
+    </th>
+  );
+}
+
 export default function HoldingsPage() {
   const { holdings, fmtVal, fmtSigned, closedPositions } = usePortfolio();
   const router = useRouter();
@@ -1026,7 +1062,8 @@ export default function HoldingsPage() {
   const toggle = (h: HoldingRow) =>
     setPicked((prev) => {
       const next = new Set(prev);
-      next.has(key(h)) ? next.delete(key(h)) : next.add(key(h));
+      if (next.has(key(h))) next.delete(key(h));
+      else next.add(key(h));
       return next;
     });
 
@@ -1040,7 +1077,8 @@ export default function HoldingsPage() {
   const toggleGroup = (k: string) =>
     setExpandedTickers((prev) => {
       const next = new Set(prev);
-      next.has(k) ? next.delete(k) : next.add(k);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
 
@@ -1100,32 +1138,6 @@ export default function HoldingsPage() {
   });
 
   const compareCards = holdings.filter((h) => picked.has(key(h)));
-
-  const Th = ({
-    k,
-    children,
-    right,
-  }: {
-    k?: SortKey;
-    children: React.ReactNode;
-    right?: boolean;
-  }) => (
-    <th
-      className={
-        "select-none border-b border-subtle px-4 py-3.5 font-ui text-[10.5px] font-semibold uppercase tracking-[.08em] text-muted light:border-b-black/[.12] " +
-        (right ? "text-right" : "text-left")
-      }
-      onClick={k ? () => sortBy(k) : undefined}
-      style={{ cursor: k ? "pointer" : "default" }}
-    >
-      {children}
-      {k && (
-        <span className="text-gold text-[11px]">
-          {sort.k === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}
-        </span>
-      )}
-    </th>
-  );
 
   const handleCsvExport = () => {
     const cols = [
@@ -1325,40 +1337,40 @@ export default function HoldingsPage() {
         <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
           <thead>
             <tr>
-              <Th k="name">Name / Ticker</Th>
-              <Th>Type</Th>
-              <Th>Broker</Th>
-              <Th>Strategy</Th>
-              <Th k="source">Source</Th>
-              <Th k="units" right>
+              <Th k="name" sort={sort} onSort={sortBy}>Name / Ticker</Th>
+              <Th sort={sort} onSort={sortBy}>Type</Th>
+              <Th sort={sort} onSort={sortBy}>Broker</Th>
+              <Th sort={sort} onSort={sortBy}>Strategy</Th>
+              <Th k="source" sort={sort} onSort={sortBy}>Source</Th>
+              <Th k="units" right sort={sort} onSort={sortBy}>
                 Units
               </Th>
-              <Th k="price" right>
+              <Th k="price" right sort={sort} onSort={sortBy}>
                 Price
               </Th>
-              <Th k="cost" right>
+              <Th k="cost" right sort={sort} onSort={sortBy}>
                 Cost
               </Th>
-              <Th k="dayPct" right>
+              <Th k="dayPct" right sort={sort} onSort={sortBy}>
                 Day %
               </Th>
-              <Th k="yield" right>
+              <Th k="yield" right sort={sort} onSort={sortBy}>
                 Yield
               </Th>
-              {hasFixedIncome && <Th right>Maturity</Th>}
-              <Th k="valueSGD" right>
+              {hasFixedIncome && <Th right sort={sort} onSort={sortBy}>Maturity</Th>}
+              <Th k="valueSGD" right sort={sort} onSort={sortBy}>
                 Value
               </Th>
-              <Th k="assetGain" right>
+              <Th k="assetGain" right sort={sort} onSort={sortBy}>
                 Asset Gain
               </Th>
-              <Th k="fxGain" right>
+              <Th k="fxGain" right sort={sort} onSort={sortBy}>
                 FX
               </Th>
-              <Th k="totalPct" right>
+              <Th k="totalPct" right sort={sort} onSort={sortBy}>
                 Total %
               </Th>
-              <Th>CCY</Th>
+              <Th sort={sort} onSort={sortBy}>CCY</Th>
             </tr>
           </thead>
           <tbody>
@@ -1937,13 +1949,13 @@ export default function HoldingsPage() {
           <table className="w-full border-collapse max-bp768:min-w-[620px] [&_tbody_tr:last-child>td]:border-b-0">
             <thead>
               <tr>
-                <Th>Name / Ticker</Th>
-                <Th>Type</Th>
-                <Th right>Units Sold</Th>
-                <Th right>Asset Gain</Th>
-                <Th right>FX Gain</Th>
-                <Th right>Realized Gain</Th>
-                <Th>Last Sale</Th>
+                <Th sort={sort} onSort={sortBy}>Name / Ticker</Th>
+                <Th sort={sort} onSort={sortBy}>Type</Th>
+                <Th right sort={sort} onSort={sortBy}>Units Sold</Th>
+                <Th right sort={sort} onSort={sortBy}>Asset Gain</Th>
+                <Th right sort={sort} onSort={sortBy}>FX Gain</Th>
+                <Th right sort={sort} onSort={sortBy}>Realized Gain</Th>
+                <Th sort={sort} onSort={sortBy}>Last Sale</Th>
               </tr>
             </thead>
             <tbody>

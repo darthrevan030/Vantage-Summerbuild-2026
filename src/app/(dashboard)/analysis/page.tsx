@@ -7,6 +7,8 @@ import { streamSentiment, streamAsk } from "@/lib/api/client/analyst-api";
 import { toNetPositions } from "@/lib/group-holdings";
 import { PAGE_SIZE } from "@/lib/news";
 import type { HoldingRow } from "@/types/holding";
+import type { AllocationSlice, CurrencyCard } from "@/types/portfolio";
+import type { PortfolioContext } from "@/lib/analyst/prompts";
 
 // shared gold button — matches the converted settings page pattern
 const BTN_GOLD =
@@ -613,7 +615,13 @@ const SUGGEST = [
   "Which holding looks most fragile?",
 ];
 
-function AskBox({ holdings }: { holdings: HoldingRow[] }) {
+function AskBox({
+  holdings,
+  portfolio,
+}: {
+  holdings: HoldingRow[];
+  portfolio: PortfolioContext;
+}) {
   const [q, setQ] = useState("");
   const [ans, setAns] = useState("");
   const [phase, setPhase] = useState<"idle" | "thinking" | "typing" | "done">(
@@ -632,19 +640,20 @@ function AskBox({ holdings }: { holdings: HoldingRow[] }) {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
+    const totalValue = holdings.reduce((s, h) => s + h.valueSGD, 0) || 1;
     const askHoldings = holdings.map((h) => ({
       name: h.name,
       assetType: h.assetType,
       totalPct: h.totalPct,
+      weightPct: (h.valueSGD / totalValue) * 100,
     }));
-    const totalSGD = holdings.reduce((s, h) => s + h.valueSGD, 0);
 
     try {
       let first = true;
       const { text: full, stopReason } = await streamAsk(
         query,
         askHoldings,
-        totalSGD,
+        portfolio,
         (chunk) => {
           if (first) {
             setPhase("typing");
@@ -737,6 +746,30 @@ let SENT_CACHE: { key: string; data: AnalysisData } | null = null;
 const holdingsKey = (holdings: HoldingRow[]) =>
   holdings.map((h) => `${h.ticker}:${h.sparkData.at(-1) ?? 0}`).join("|");
 
+function toPortfolioContext(
+  positions: HoldingRow[],
+  assetAllocation: AllocationSlice[],
+  geoAllocation: AllocationSlice[],
+  currencyCards: CurrencyCard[],
+): PortfolioContext {
+  const totalValueSGD = positions.reduce((s, h) => s + h.valueSGD, 0);
+  const costSGD = positions.reduce((s, h) => s + h.costSGD, 0);
+  const unrealGainPct =
+    costSGD > 0 ? ((totalValueSGD - costSGD) / costSGD) * 100 : 0;
+  const toPct = (arr: AllocationSlice[]) => {
+    const sum = arr.reduce((s, a) => s + a.value, 0) || 1;
+    return arr.map((a) => ({ label: a.label, pct: (a.value / sum) * 100 }));
+  };
+  return {
+    totalValueSGD,
+    costSGD,
+    unrealGainPct,
+    assetAllocation: toPct(assetAllocation),
+    geoAllocation: toPct(geoAllocation),
+    currencyExposure: currencyCards.map((c) => ({ code: c.code, pct: c.exposurePct })),
+  };
+}
+
 function buildFallback(holdings: HoldingRow[]): AnalysisData {
   const items = holdings.map((h, i) => {
     const id = h.ticker !== "—" ? h.ticker : h.assetType + "_" + i;
@@ -758,7 +791,11 @@ function buildFallback(holdings: HoldingRow[]): AnalysisData {
   return { items, overall: FALLBACK_OVERALL, source: "sample" };
 }
 
-async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
+async function runSentimentAI(
+  holdings: HoldingRow[],
+  portfolio: PortfolioContext,
+): Promise<AnalysisData> {
+  const totalValue = holdings.reduce((s, h) => s + h.valueSGD, 0) || 1;
   const assets = holdings.map((h, i) => ({
     id: h.ticker !== "—" ? h.ticker : h.assetType + "_" + i,
     name: h.name,
@@ -766,10 +803,30 @@ async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
     icon: h.icon,
     sparkData: h.sparkData,
     delta: priceDelta(h.sparkData),
+    weightPct: (h.valueSGD / totalValue) * 100,
+    valueSGD: h.valueSGD,
+    costSGD: h.costSGD,
+    unrealPct: h.totalPct,
+    currency: h.currency || "SGD",
+    assetGain: h.assetGain,
+    fxGain: h.fxGain,
   }));
 
   const { text, stopReason } = await streamSentiment(
-    assets.map(({ id, name, type, delta }) => ({ id, name, type, delta })),
+    assets.map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: a.type,
+      delta: a.delta,
+      weightPct: a.weightPct,
+      valueSGD: a.valueSGD,
+      costSGD: a.costSGD,
+      unrealPct: a.unrealPct,
+      currency: a.currency,
+      assetGain: a.assetGain,
+      fxGain: a.fxGain,
+    })),
+    portfolio,
   );
 
   if (stopReason === "max_tokens") {
@@ -821,10 +878,14 @@ async function runSentimentAI(holdings: HoldingRow[]): Promise<AnalysisData> {
 }
 
 export default function AnalysisPage() {
-  const { holdings } = usePortfolio();
+  const { holdings, assetAllocation, geoAllocation, currencyCards } = usePortfolio();
   // One card per instrument: net out sells and collapse multi-lot positions so
   // the same ticker never appears twice.
   const positions = useMemo(() => toNetPositions(holdings), [holdings]);
+  const portfolio = useMemo(
+    () => toPortfolioContext(positions, assetAllocation, geoAllocation, currencyCards),
+    [positions, assetAllocation, geoAllocation, currencyCards],
+  );
   const key = holdingsKey(positions);
   const cached = SENT_CACHE?.key === key ? SENT_CACHE.data : null;
 
@@ -849,7 +910,7 @@ export default function AnalysisPage() {
     prefetchAllNews(ids); // intentionally not awaited — fire and forget
     let res: AnalysisData;
     try {
-      res = await runSentimentAI(positions);
+      res = await runSentimentAI(positions, portfolio);
     } catch (err) {
       console.warn("sentiment AI failed, using sample data:", err);
       res = buildFallback(positions);
@@ -865,7 +926,7 @@ export default function AnalysisPage() {
     (async () => {
       let res: AnalysisData;
       try {
-        res = await runSentimentAI(positions);
+        res = await runSentimentAI(positions, portfolio);
       } catch (err) {
         console.warn("sentiment AI failed, using sample data:", err);
         res = buildFallback(positions);
@@ -920,7 +981,7 @@ export default function AnalysisPage() {
       </div>
 
       <Hero overall={data.overall} items={data.items} />
-      <AskBox holdings={positions} />
+      <AskBox holdings={positions} portfolio={portfolio} />
       {/* Two independent columns (masonry): each flows on its own so expanding
           a card never leaves a gap in the other column. */}
       <div className="flex items-start gap-[18px] max-bp1080:flex-col max-bp768:w-full">
